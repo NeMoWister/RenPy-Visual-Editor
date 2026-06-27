@@ -28,8 +28,7 @@
 # Скриншоты
 
 ```
-docs/images/editor.png
-
+![Главное окно](docs/images/editor.png)
 ```
 
 ---
