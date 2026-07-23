@@ -1,4 +1,15 @@
+                       
+"""
+Простой глобальный кэш QPixmap по пути к файлу, чтобы при многократном
+открытии одного и того же узла (выбор фона/CG/спрайта) картинка не
+перечитывалась и не масштабировалась с диска каждый раз — это и было
+причиной заметных задержек при большом количестве ресурсов.
 
+Кэш хранит как полноразмерный pixmap (для масштабирования под разные
+нужды без повторного чтения файла), так и уже отмасштабированные версии
+под конкретные размеры (thumb_size для карточек, ширина/высота превью
+сцены) — масштабирование тоже не бесплатно при больших исходных файлах.
+"""
 from typing import Dict, Optional, Tuple, List
 from PyQt6.QtGui import QPixmap, QImageReader, QImage, QPainter
 from PyQt6.QtCore import Qt, QSize
@@ -9,6 +20,8 @@ _composite_cache: Dict[tuple, QPixmap] = {}
 
 
 def get_pixmap(abs_path: str) -> Optional[QPixmap]:
+    """Возвращает полноразмерный QPixmap для пути, с кэшированием.
+    Возвращает None, если файл не удалось загрузить (битый/отсутствует)."""
     if abs_path in _full_cache:
         cached = _full_cache[abs_path]
         return cached if not cached.isNull() else None
@@ -19,6 +32,11 @@ def get_pixmap(abs_path: str) -> Optional[QPixmap]:
 
 def get_scaled(abs_path: str, width: int, height: int,
                aspect_mode: Qt.AspectRatioMode = Qt.AspectRatioMode.KeepAspectRatio) -> Optional[QPixmap]:
+    """Возвращает QPixmap, отмасштабированный под заданный размер, с кэшированием
+    результата. Для файлов, которых ещё нет в кэше, масштабирует ПРИ ЧТЕНИИ
+    с диска через QImageReader — это намного быстрее, чем сначала декодировать
+    изображение в полном разрешении (например, 4000x3000) и только потом
+    уменьшать его: декодер сразу пишет уменьшенную картинку."""
     key = (abs_path, width, height)
     if key in _scaled_cache:
         return _scaled_cache[key]
@@ -59,6 +77,14 @@ def _read_scaled_from_disk(abs_path: str, width: int, height: int,
 
 def get_composite(layer_paths_with_offsets: List[Tuple[str, int, int]], canvas_w: int, canvas_h: int,
                    target_w: Optional[int] = None, target_h: Optional[int] = None) -> Optional[QPixmap]:
+    """Накладывает несколько изображений друг на друга на холсте canvas_w x
+    canvas_h (как делает Ren'Py im.Composite), с указанными смещениями, и
+    при необходимости масштабирует результат до target_w x target_h.
+    Используется для составных спрайтов (персонаж = тело + доп.слои +
+    эмоция). Результат кэшируется по полному набору входных параметров —
+    повторная отрисовка той же комбинации слоёв не перечитывает файлы.
+    layer_paths_with_offsets: список (abs_path, offset_x, offset_y), в
+    порядке отрисовки (как в Ren'Py — каждый следующий слой поверх предыдущих)."""
     key = (tuple(layer_paths_with_offsets), canvas_w, canvas_h, target_w, target_h)
     if key in _composite_cache:
         return _composite_cache[key]
@@ -88,6 +114,9 @@ def get_composite(layer_paths_with_offsets: List[Tuple[str, int, int]], canvas_w
 
 
 def invalidate(abs_path: Optional[str] = None):
+    """Сбрасывает кэш для конкретного файла, либо весь кэш, если путь не указан.
+    Нужно вызывать после пересканирования ресурсов (F5) на случай, если файлы
+    на диске изменились."""
     global _full_cache, _scaled_cache, _composite_cache
     if abs_path is None:
         _full_cache = {}

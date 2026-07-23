@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+                       
 """
 Вычисление визуального состояния сцены (фон, CG, активные спрайты,
 текущая реплика) на момент конкретного узла — используется для
@@ -16,8 +16,8 @@ class ActiveSprite:
     expression: Optional[str]
     position: SpritePosition
     tag: str
-    group_path: str = ""  # топ-уровневая папка персонажа (и подпапка вариации) для обычных папочных спрайтов
-    composite: Optional[CompositeSprite] = None  # заполнено, если это составной спрайт из sprites.rpy
+    group_path: str = ""                                                                                     
+    composite: Optional[CompositeSprite] = None                                                       
 
     def top_group(self) -> str:
         """Имя персонажа: для составного спрайта — CompositeSprite.character,
@@ -80,11 +80,11 @@ def _apply_node(state: SceneState, node: SceneNode, is_current: bool, rm=None):
 
     if t in (NodeType.SHOW_BG, NodeType.SCENE):
         state.bg_var = node.bg_var or None
-        # Новый фон полностью переопределяет видимую сцену: CG (полноэкранная
-        # картинка поверх фона) больше не актуален, иначе он навечно
-        # перекрывал бы все последующие фоны в предпросмотре.
+                                                                             
+                                                                    
+                                                             
         state.cg_var = None
-        # "scene"/смена фона в Ren'Py обычно сбрасывает спрайты на экране
+                                                                         
         if t == NodeType.SCENE:
             state.sprites.clear()
     elif t == NodeType.SHOW_CG:
@@ -113,10 +113,10 @@ def _apply_node(state: SceneState, node: SceneNode, is_current: bool, rm=None):
             )
     elif t == NodeType.HIDE_SPRITE:
         if node.hide_group:
-            # Скрыть ЛЮБОЙ активный спрайт, чья папка персонажа (верхний
-            # уровень group_path, либо character у составного спрайта)
-            # совпадает с hide_group — без необходимости знать точный
-            # тег/вариацию, которая сейчас показана.
+                                                                        
+                                                                      
+                                                                     
+                                                    
             to_remove = [tag for tag, sp in state.sprites.items() if sp.top_group() == node.hide_group]
             for tag in to_remove:
                 del state.sprites[tag]
@@ -133,9 +133,9 @@ def _apply_node(state: SceneState, node: SceneNode, is_current: bool, rm=None):
             state.char_var = None
             state.text = node.text
         else:
-            # Для несценических узлов (label, jump, музыка и т.п.)
-            # оставляем последнюю показанную реплику пустой, чтобы
-            # не путать пользователя текстом из прошлого узла.
+                                                                  
+                                                                  
+                                                              
             if t not in (NodeType.SHOW_BG, NodeType.SHOW_CG, NodeType.SCENE,
                          NodeType.SHOW_SPRITE, NodeType.HIDE_SPRITE,
                          NodeType.HIDE_CG):

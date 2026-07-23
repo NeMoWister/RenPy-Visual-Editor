@@ -1,3 +1,4 @@
+                       
 from dataclasses import dataclass, field
 from typing import Optional, List
 from enum import Enum
@@ -13,6 +14,8 @@ class NodeType(Enum):
     PLAY_MUSIC = "play_music"
     PLAY_SOUND = "play_sound"
     STOP_MUSIC = "stop_music"
+    PLAY_AMBIENCE = "play_ambience"
+    STOP_AMBIENCE = "stop_ambience"
     SHOW_CG = "show_cg"
     HIDE_CG = "hide_cg"
     LABEL = "label"
@@ -23,6 +26,14 @@ class NodeType(Enum):
     RETURN = "return_"
     SCENE = "scene"
     COMMENT = "comment"
+    WINDOW = "window"
+    WITH_TRANSITION = "with_transition"
+                                                                         
+                                                                          
+                                                                 
+                                                        
+    RAW = "raw"
+    CUSTOM = "custom"
 
 
 @dataclass
@@ -51,6 +62,52 @@ PRESET_POSITIONS = {
     "right":        SpritePosition(0.8, 1.0),
 }
 
+                                                                   
+                                                                     
+                                                                     
+                                                                       
+                                               
+NAMED_SPRITE_POSITIONS = {
+    "fleft":  SpritePosition(0.16, 1.0),
+    "left":   SpritePosition(0.28, 1.0),
+    "cleft":  SpritePosition(0.355, 1.0),
+    "center": SpritePosition(0.5, 1.0),
+    "centre": SpritePosition(0.5, 1.0),
+    "cright": SpritePosition(0.645, 1.0),
+    "right":  SpritePosition(0.72, 1.0),
+    "fright": SpritePosition(0.84, 1.0),
+}
+
+                                                                             
+                                                                               
+                                                                                
+ANCHOR_POSITIONS = [
+    ("fleft",  "fleft — крайний левый край"),
+    ("left",   "left — левее центра"),
+    ("cleft",  "cleft — чуть левее центра"),
+    ("center", "center — центр"),
+    ("cright", "cright — чуть правее центра"),
+    ("right",  "right — правее центра"),
+    ("fright", "fright — крайний правый край"),
+]
+
+
+def nearest_anchor_name(xalign: float) -> str:
+    """Возвращает имя именованного якоря, ближайшего к данному xalign."""
+    best_name = "center"
+    best_dist = None
+    for name, _ in ANCHOR_POSITIONS:
+        dist = abs(NAMED_SPRITE_POSITIONS[name].xalign - xalign)
+        if best_dist is None or dist < best_dist:
+            best_dist = dist
+            best_name = name
+    return best_name
+
+
+def anchor_xalign(name: str) -> float:
+    pos = NAMED_SPRITE_POSITIONS.get(name)
+    return pos.xalign if pos else 0.5
+
 
 @dataclass
 class SceneNode:
@@ -60,16 +117,16 @@ class SceneNode:
     text: str = ""
     bg_var: Optional[str] = None
     cg_var: Optional[str] = None
-    transition: str = "dspr"
+    transition: str = "dissolve"
     sprite_var: Optional[str] = None
     sprite_expression: Optional[str] = None
     sprite_position: SpritePosition = field(default_factory=SpritePosition)
     sprite_tag: Optional[str] = None
-    # Для HIDE_SPRITE: если выбрана не конкретная картинка, а вся папка
-    # персонажа ("скрыть кого угодно из этой папки, кто сейчас на сцене"),
-    # сюда пишется имя верхней папки (например "us"), а sprite_tag/hide_var
-    # остаётся пустым. Конкретный активный тег этого персонажа подбирается
-    # на этапе предпросмотра/генерации кода по факту того, что сейчас на сцене.
+                                                                       
+                                                                          
+                                                                           
+                                                                          
+                                                                               
     hide_group: Optional[str] = None
     music_var: Optional[str] = None
     sound_var: Optional[str] = None
@@ -83,24 +140,39 @@ class SceneNode:
     menu_prompt: str = ""
     menu_choices: List[tuple] = field(default_factory=list)
     comment_text: str = ""
+                                                                     
+                                                 
+    window_action: str = "show"                   
+                                                                            
+                                                                          
+    ambience_var: Optional[str] = None
+    ambience_fadein: float = 0.0
+    ambience_fadeout: float = 0.0
+    color_tag: Optional[str] = None                                                               
+    custom_template_id: str = ""
+    custom_params: dict = field(default_factory=dict)
+                                                                       
+                                                                      
 
     def normalized_menu_choices(self):
-        """Возвращает menu_choices в едином виде (text, jump, use_call), даже
-        если в проекте сохранён старый формат (text, jump) без флага —
-        для него use_call по умолчанию False (старое поведение: jump)."""
+        """Возвращает menu_choices в едином виде (text, jump, use_call, raw_body),
+        совместимо со старым форматом (2- и 3-элементные кортежи без raw_body)."""
         result = []
         for ch in self.menu_choices:
             if isinstance(ch, dict):
                 text = ch.get("text", "")
                 jump = ch.get("jump", "")
                 use_call = ch.get("use_call", False)
-            elif len(ch) >= 3:
-                text, jump, use_call = ch[0], ch[1], ch[2]
+                raw_body = ch.get("raw_body", "")
+            elif len(ch) >= 4:
+                text, jump, use_call, raw_body = ch[0], ch[1], ch[2], ch[3]
+            elif len(ch) == 3:
+                text, jump, use_call, raw_body = ch[0], ch[1], ch[2], ""
             elif len(ch) == 2:
-                text, jump, use_call = ch[0], ch[1], False
+                text, jump, use_call, raw_body = ch[0], ch[1], False, ""
             else:
-                text, jump, use_call = (ch[0] if ch else ""), "", False
-            result.append((text, jump, bool(use_call)))
+                text, jump, use_call, raw_body = (ch[0] if ch else ""), "", False, ""
+            result.append((text, jump, bool(use_call), raw_body or ""))
         return result
 
     @property
@@ -143,12 +215,18 @@ class SceneNode:
 
     @property
     def audio_var(self):
-        return self.music_var if self.node_type == NodeType.PLAY_MUSIC else self.sound_var
+        if self.node_type == NodeType.PLAY_SOUND:
+            return self.sound_var
+        if self.node_type == NodeType.PLAY_AMBIENCE:
+            return self.ambience_var
+        return self.music_var
 
     @audio_var.setter
     def audio_var(self, value):
         if self.node_type == NodeType.PLAY_SOUND:
             self.sound_var = value
+        elif self.node_type == NodeType.PLAY_AMBIENCE:
+            self.ambience_var = value
         else:
             self.music_var = value
 
@@ -207,7 +285,34 @@ class SceneNode:
             return '⏹ Return (выход в главное меню / возврат из call)'
         elif t == NodeType.COMMENT:
             return f'# {self.comment_text[:50]}'
+        elif t == NodeType.WINDOW:
+            action = "Показать" if self.window_action == "show" else "Скрыть"
+            trans = f"  [{self.transition}]" if self.transition else ""
+            return f'🪟 Текстовое окно: {action}{trans}'
+        elif t == NodeType.PLAY_AMBIENCE:
+            return f'🌬 Эмбиенс: {self.ambience_var or "—"}'
+        elif t == NodeType.STOP_AMBIENCE:
+            return f'🔇 Стоп эмбиенс'
+        elif t == NodeType.WITH_TRANSITION:
+            return f'✨ Эффект: with {self.transition or "—"}'
+        elif t == NodeType.RAW:
+            code_short = self.python_code[:50].replace('\n', ' ⏎ ')
+            return f'🧩 Импорт (неразпознано): {code_short}'
+        elif t == NodeType.CUSTOM:
+            params_short = ", ".join(f"{k}={v}" for k, v in list(self.custom_params.items())[:3])
+            return f'🧬 {self.custom_template_id or "?"}({params_short})'
         return str(t.value)
+
+
+@dataclass
+class NodeGroup:
+    """Сворачиваемая именованная рамка вокруг диапазона нод сцены
+    (для визуального разделения актов/глав в графе)."""
+    group_id: str = field(default_factory=lambda: str(uuid.uuid4())[:8])
+    title: str = "Группа"
+    node_ids: List[str] = field(default_factory=list)
+    collapsed: bool = False
+    color: str = "#ff8c3d"
 
 
 @dataclass
@@ -215,6 +320,7 @@ class Scene:
     scene_id: str = field(default_factory=lambda: str(uuid.uuid4())[:8])
     name: str = "Сцена 1"
     nodes: List[SceneNode] = field(default_factory=list)
+    groups: List[NodeGroup] = field(default_factory=list)
 
 
 @dataclass

@@ -1,10 +1,11 @@
+                       
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QDialogButtonBox
 )
 from PyQt6.QtCore import Qt, QUrl
 from PyQt6.QtGui import QDesktopServices
 
-RESOURCES_URL = "https://disk.yandex.ru/d/SqnaZquLyvZ6-Q"
+RESOURCES_URL = "https://disk.yandex.ru/d/OeMHgq8TVvvyug"
 
 
 class ResourcesDownloadDialog(QDialog):
@@ -22,7 +23,7 @@ class ResourcesDownloadDialog(QDialog):
         layout.setSpacing(14)
 
         title = QLabel("Ресурсы, необходимые для создания модификаций")
-        title.setStyleSheet("font-size: 14px; font-weight: bold; color: #ff8c00;")
+        title.setStyleSheet("font-size: 14px; font-weight: bold; color: #ff8c3d;")
         title.setWordWrap(True)
         layout.addWidget(title)
 

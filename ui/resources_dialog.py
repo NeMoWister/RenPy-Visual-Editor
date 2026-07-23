@@ -1,19 +1,29 @@
+                       
 import os
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QFileDialog, QTableWidget, QTableWidgetItem,
-    QDialogButtonBox, QGroupBox, QHeaderView, QMessageBox
+    QDialogButtonBox, QGroupBox, QHeaderView, QMessageBox, QCheckBox
 )
 from PyQt6.QtCore import Qt
 from core.resource_manager import ResourceManager
+from core.tags_store import TagsStore
+from core.resource_usage_store import ResourceUsageStore
+from ui.tags_dialog import TagPickerDialog
+
+TAGGABLE_CATEGORIES = {"bg", "cg"}
 
 
 class ResourcesConfigDialog(QDialog):
-    def __init__(self, resource_manager: ResourceManager, parent=None):
+    def __init__(self, resource_manager: ResourceManager, tags_store: TagsStore = None,
+                 base_dir: str = "", parent=None, usage_store: ResourceUsageStore = None):
         super().__init__(parent)
         self.rm = resource_manager
+        self.tags_store = tags_store
+        self.base_dir = base_dir
+        self.usage_store = usage_store
         self.setWindowTitle("Настройки ресурсов")
-        self.setMinimumSize(700, 500)
+        self.setMinimumSize(760, 500)
         self._setup_ui()
         self._load_data()
 
@@ -42,16 +52,24 @@ class ResourcesConfigDialog(QDialog):
         info.setWordWrap(True)
         layout.addWidget(info)
 
-        og = QGroupBox("Переопределения имён")
+        if self.usage_store is not None:
+            self.fav_recent_check = QCheckBox("Показывать «Избранное» и «Недавние» вверху карусели ресурсов")
+            self.fav_recent_check.setChecked(self.usage_store.enabled)
+            self.fav_recent_check.setStyleSheet("color:#ccc;")
+            self.fav_recent_check.toggled.connect(self._on_fav_recent_toggled)
+            layout.addWidget(self.fav_recent_check)
+
+        og = QGroupBox("Переопределения имён и теги")
         og_l = QVBoxLayout(og)
         self.table = QTableWidget()
-        self.table.setColumnCount(5)
-        self.table.setHorizontalHeaderLabels(["Файл", "Источник", "Авто-переменная", "Своё имя", "Своя переменная"])
+        self.table.setColumnCount(6)
+        self.table.setHorizontalHeaderLabels(["Файл", "Источник", "Авто-переменная", "Своё имя", "Своя переменная", "Теги"])
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
         og_l.addWidget(self.table)
 
         btn_row = QHBoxLayout()
@@ -72,6 +90,7 @@ class ResourcesConfigDialog(QDialog):
         reset_btn = QPushButton("🗑 Сбросить переопределения")
         reset_btn.setToolTip("Полностью удалить все свои имена/переменные — ресурсы вернутся "
                               "к автоматически сгенерированным именам.")
+        reset_btn.setObjectName("btn_secondary")
         reset_btn.clicked.connect(self._reset_overrides)
         btn_row.addWidget(reset_btn)
         og_l.addLayout(btn_row)
@@ -98,10 +117,40 @@ class ResourcesConfigDialog(QDialog):
                 self.table.setItem(row, 3, QTableWidgetItem(override.custom_name if override else ""))
                 self.table.setItem(row, 4, QTableWidgetItem(override.custom_var if override else ""))
 
+                if self.tags_store is not None and e.category in TAGGABLE_CATEGORIES:
+                    self.table.setCellWidget(row, 5, self._make_tags_button(e.var_name, e.display_name))
+                else:
+                    placeholder = QTableWidgetItem("—")
+                    placeholder.setFlags(Qt.ItemFlag.ItemIsEnabled)
+                    placeholder.setForeground(Qt.GlobalColor.darkGray)
+                    placeholder.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                    self.table.setItem(row, 5, placeholder)
+
+    def _make_tags_button(self, var_name: str, display_name: str) -> QPushButton:
+        def label():
+            keys = self.tags_store.get_tags_for(var_name)
+            return f"🏷 {len(keys)}" if keys else "🏷 Теги..."
+
+        btn = QPushButton(label())
+        btn.setObjectName("btn_secondary")
+
+        def on_click():
+            dlg = TagPickerDialog(self.tags_store, self.base_dir, var_name, display_name, self)
+            if dlg.exec():
+                btn.setText(label())
+
+        btn.clicked.connect(on_click)
+        return btn
+
     def _browse_path(self):
         d = QFileDialog.getExistingDirectory(self, "Выберите папку ресурсов")
         if d:
             self.path_edit.setText(d)
+
+    def _on_fav_recent_toggled(self, checked: bool):
+        if self.usage_store is not None:
+            self.usage_store.enabled = checked
+            self.usage_store.save(self.base_dir)
 
     def _save_overrides(self):
         for row in range(self.table.rowCount()):
@@ -113,6 +162,8 @@ class ResourcesConfigDialog(QDialog):
         QMessageBox.information(self, "Готово", "Переопределения сохранены")
 
     def _export_overrides(self):
+                                                                      
+                                                                                
         for row in range(self.table.rowCount()):
             rel = self.table.item(row, 0).text()
             name = self.table.item(row, 3).text().strip()
@@ -161,7 +212,7 @@ class ResourcesConfigDialog(QDialog):
         try:
             count = self.rm.import_overrides(path, merge=merge)
             self.rm.save_config()
-            self.rm.scan()
+            self.rm.scan()                                                                          
             self._load_data()
             QMessageBox.information(self, "Готово", f"Импортировано {count} переопределений.")
         except Exception as e:

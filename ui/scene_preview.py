@@ -1,13 +1,26 @@
-from pathlib import Path
+                       
+import os
 from typing import Optional, List
 from PyQt6.QtWidgets import QWidget
-from PyQt6.QtCore import Qt, QRect, QPoint, pyqtSignal
-from PyQt6.QtGui import QPainter, QPixmap, QColor, QFont, QPen
+from PyQt6.QtCore import Qt, QRect, QRectF, QPoint, pyqtSignal
+from PyQt6.QtGui import QPainter, QPixmap, QColor, QFont, QPen, QTextDocument
 from ui.pixmap_cache import get_scaled
+from core.models import ANCHOR_POSITIONS, NAMED_SPRITE_POSITIONS, nearest_anchor_name
+from core.renpy_text_tags import parse_renpy_text, runs_to_html
 
 PREVIEW_W = 640
 PREVIEW_H = 360
-CLICK_DRAG_THRESHOLD = 4
+CLICK_DRAG_THRESHOLD = 4                                                                
+
+                                                                           
+                                                                          
+                                                                  
+                                                      
+ANCHOR_XALIGNS = [NAMED_SPRITE_POSITIONS[name].xalign for name, _ in ANCHOR_POSITIONS]
+
+
+def _snap_to_anchor(xalign: float) -> float:
+    return min(ANCHOR_XALIGNS, key=lambda a: abs(a - xalign))
 
 
 class SpriteLayer:
@@ -21,24 +34,36 @@ class SpriteLayer:
 
 class ScenePreview(QWidget):
     sprite_moved = pyqtSignal(float)
-    sprite_delete_requested = pyqtSignal(str)
+    sprite_delete_requested = pyqtSignal(str)                          
 
     def __init__(self):
         super().__init__()
         self.bg_pixmap: Optional[QPixmap] = None
         self.sprites: List[SpriteLayer] = []
         self.char_name: str = ""
+        self.char_color: Optional[str] = None
         self.dialogue_text: str = ""
         self.dragging_sprite_idx: Optional[int] = None
         self.drag_offset = QPoint()
         self.press_pos: Optional[QPoint] = None
         self.did_drag = False
         self.hover_sprite_idx: Optional[int] = None
+        self.scale_factor: float = 1.0
         self.setFixedSize(PREVIEW_W, PREVIEW_H)
         self.setMouseTracking(True)
 
+    def set_scale(self, factor: float):
+        """Масштабирует превью целиком (от слайдера зума), не меняя логику
+        отрисовки и попадания мышью — координаты ниже переведены в логические."""
+        self.scale_factor = max(0.4, min(2.0, factor))
+        self.setFixedSize(int(PREVIEW_W * self.scale_factor), int(PREVIEW_H * self.scale_factor))
+        self.update()
+
+    def _to_logical(self, pos: QPoint) -> QPoint:
+        return QPoint(int(pos.x() / self.scale_factor), int(pos.y() / self.scale_factor))
+
     def set_background(self, path: Optional[str]):
-        if path and Path(path).is_file():
+        if path and os.path.isfile(path):
             self.bg_pixmap = get_scaled(
                 path, PREVIEW_W, PREVIEW_H,
                 Qt.AspectRatioMode.KeepAspectRatioByExpanding,
@@ -52,8 +77,9 @@ class ScenePreview(QWidget):
         self.hover_sprite_idx = None
         self.update()
 
-    def set_dialogue(self, char_name: str, text: str):
+    def set_dialogue(self, char_name: str, text: str, char_color: Optional[str] = None):
         self.char_name = char_name
+        self.char_color = char_color
         self.dialogue_text = text
         self.update()
 
@@ -80,6 +106,7 @@ class ScenePreview(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        painter.scale(self.scale_factor, self.scale_factor)
 
         if self.bg_pixmap:
             painter.drawPixmap(0, 0, self.bg_pixmap)
@@ -88,6 +115,22 @@ class ScenePreview(QWidget):
             painter.setPen(QColor(60, 60, 80))
             painter.setFont(QFont("Arial", 16))
             painter.drawText(QRect(0, 0, PREVIEW_W, PREVIEW_H), Qt.AlignmentFlag.AlignCenter, "[ Фон не задан ]")
+
+        if self.dragging_sprite_idx is not None:
+                                                                    
+                                                                         
+                                                          
+            painter.setFont(QFont("Arial", 8))
+            active_layer = self.sprites[self.dragging_sprite_idx]
+            for name, _ in ANCHOR_POSITIONS:
+                ax = NAMED_SPRITE_POSITIONS[name].xalign
+                x = int(ax * PREVIEW_W)
+                is_active = abs(ax - active_layer.xalign) < 1e-6
+                color = QColor(255, 140, 0, 220) if is_active else QColor(255, 255, 255, 60)
+                painter.setPen(QPen(color, 2 if is_active else 1, Qt.PenStyle.DashLine))
+                painter.drawLine(x, 0, x, PREVIEW_H)
+                painter.setPen(color)
+                painter.drawText(x - 15, 12, name)
 
         for i, layer in enumerate(self.sprites):
             rect = self._sprite_rect(layer)
@@ -100,9 +143,13 @@ class ScenePreview(QWidget):
                 painter.setBrush(Qt.BrushStyle.NoBrush)
                 painter.drawRect(rect)
             elif self.hover_sprite_idx == i:
+                                                                            
+                                                                            
                 painter.setPen(QPen(QColor(255, 60, 60), 2, Qt.PenStyle.DashLine))
                 painter.setBrush(Qt.BrushStyle.NoBrush)
                 painter.drawRect(rect)
+                                                                            
+                                                                         
                 hint_text = "✕ удалить"
                 painter.setFont(QFont("Arial", 9, QFont.Weight.Bold))
                 text_w = painter.fontMetrics().horizontalAdvance(hint_text) + 12
@@ -121,20 +168,43 @@ class ScenePreview(QWidget):
             dbox_y = PREVIEW_H - dbox_h - 5
             painter.fillRect(0, dbox_y, PREVIEW_W, dbox_h, QColor(0, 0, 0, 180))
             if self.char_name:
-                painter.fillRect(10, dbox_y - 22, 120, 22, QColor(50, 100, 180, 220))
-                painter.setPen(QColor(255, 255, 255))
+                painter.fillRect(10, dbox_y - 22, 120, 22, QColor(5, 5, 5, 220))
+                name_color = QColor(255, 255, 255)
+                if self.char_color:
+                    candidate = QColor(self.char_color)
+                    if candidate.isValid():
+                        name_color = candidate
+                painter.setPen(name_color)
                 painter.setFont(QFont("Arial", 12, QFont.Weight.Bold))
                 painter.drawText(QRect(10, dbox_y - 22, 120, 22), Qt.AlignmentFlag.AlignCenter, self.char_name)
             painter.setPen(QColor(220, 220, 220))
             painter.setFont(QFont("Arial", 12))
-            painter.drawText(QRect(20, dbox_y + 10, PREVIEW_W - 40, dbox_h - 20),
-                           Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop | Qt.TextFlag.TextWordWrap,
-                           self.dialogue_text)
+            self._draw_rich_text(
+                painter, QRect(20, dbox_y + 10, PREVIEW_W - 40, dbox_h - 20),
+                self.dialogue_text
+            )
+
         painter.end()
+
+    def _draw_rich_text(self, painter: QPainter, rect: QRect, raw_text: str):
+        """Рендерит текст реплики с поддержкой тегов Ren'Py ({i},{b},{u},
+        {color=..},{size=..},{alpha=..}) через QTextDocument — теги видны
+        визуально в превью, но статично (без покадровой печати — та есть
+        только в режиме презентации)."""
+        runs, _events = parse_renpy_text(raw_text)
+        html = runs_to_html(runs, base_size=13)
+        doc = QTextDocument()
+        doc.setDefaultFont(painter.font())
+        doc.setTextWidth(rect.width())
+        doc.setHtml(f'<div style="color:#dcdcdc;">{html}</div>')
+        painter.save()
+        painter.translate(rect.topLeft())
+        doc.drawContents(painter, QRectF(0, 0, rect.width(), rect.height()))
+        painter.restore()
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            pos = event.position().toPoint()
+            pos = self._to_logical(event.position().toPoint())
             idx = self._sprite_at(pos)
             if idx is not None:
                 self.dragging_sprite_idx = idx
@@ -144,7 +214,7 @@ class ScenePreview(QWidget):
                 self.setCursor(Qt.CursorShape.ClosedHandCursor)
 
     def mouseMoveEvent(self, event):
-        pos = event.position().toPoint()
+        pos = self._to_logical(event.position().toPoint())
         if self.dragging_sprite_idx is not None:
             if self.press_pos is not None and not self.did_drag:
                 moved = (pos - self.press_pos).manhattanLength()
@@ -152,7 +222,8 @@ class ScenePreview(QWidget):
                     self.did_drag = True
             if self.did_drag:
                 new_x = pos.x() - self.drag_offset.x()
-                xalign = max(0.0, min(1.0, new_x / PREVIEW_W))
+                raw_xalign = max(0.0, min(1.0, new_x / PREVIEW_W))
+                xalign = _snap_to_anchor(raw_xalign)
                 self.sprites[self.dragging_sprite_idx].xalign = xalign
                 self.sprite_moved.emit(xalign)
                 self.update()
@@ -165,12 +236,15 @@ class ScenePreview(QWidget):
 
     def mouseReleaseEvent(self, event):
         if self.dragging_sprite_idx is not None and not self.did_drag:
+                                                                            
+                                                                       
+                                                                            
             tag = self.sprites[self.dragging_sprite_idx].tag
             self.sprite_delete_requested.emit(tag)
         self.dragging_sprite_idx = None
         self.press_pos = None
         self.did_drag = False
-        pos = event.position().toPoint()
+        pos = self._to_logical(event.position().toPoint())
         idx = self._sprite_at(pos)
         self.hover_sprite_idx = idx
         self.setCursor(Qt.CursorShape.PointingHandCursor if idx is not None else Qt.CursorShape.ArrowCursor)

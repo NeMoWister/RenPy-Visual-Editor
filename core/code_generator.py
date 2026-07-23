@@ -1,7 +1,26 @@
 from typing import List, Dict, Optional
 from .models import Project, Scene, SceneNode, NodeType, Character
+from .custom_node_templates import CustomNodeTemplateStore
 
 INDENT = "    "
+COMMENT_PREFIX = "#"
+
+                                                                          
+                                                                             
+                                                                              
+_GROUPABLE_TRANSITION_TYPES = {
+    NodeType.SCENE, NodeType.SHOW_BG, NodeType.SHOW_CG,
+    NodeType.SHOW_SPRITE, NodeType.WINDOW,
+}
+
+
+def _fmt_seconds(value) -> str:
+    """Форматирует число секунд для fadein/fadeout: целые без '.0' (3, не 3.0),
+    дробные с одним знаком после запятой (1.5)."""
+    value = round(float(value), 1)
+    if value == int(value):
+        return str(int(value))
+    return f"{value:.1f}"
 
 
 def _sprite_tag(node: SceneNode, rm=None) -> str:
@@ -56,8 +75,26 @@ def _render_sprite_group(nodes: List[SceneNode], pad: str) -> List[str]:
     return lines
 
 
+def _render_node_no_transition(node: SceneNode, pad: str) -> List[str]:
+    """Рендерит 'тело' групппируемой ноды БЕЗ хвостового 'with X' — для нод,
+    которые попали в общую группу с единым переходом (см. _group_with_runs).
+    Поддерживает только типы из _GROUPABLE_TRANSITION_TYPES."""
+    t = node.node_type
+    if t == NodeType.SHOW_SPRITE:
+        return _render_sprite_show_lines(node, pad)
+    if t == NodeType.SCENE:
+        return [f"{pad}scene {node.bg_var or 'black'}"]
+    if t == NodeType.SHOW_BG:
+        return [f"{pad}show {node.bg_var or 'black'}"]
+    if t == NodeType.SHOW_CG:
+        return [f"{pad}show {node.cg_var}"] if node.cg_var else []
+    if t == NodeType.WINDOW:
+        return [f"{pad}window {node.window_action}"]
+    return []
+
+
 def generate_node(node: SceneNode, indent: int = 1, active_sprites: Optional[Dict[str, str]] = None,
-                   rm=None) -> List[str]:
+                   rm=None, custom_templates: Optional[CustomNodeTemplateStore] = None) -> List[str]:
     """
     active_sprites: словарь {tag: group_path верхнего уровня (имя папки персонажа)}
     активных на сцене спрайтов на момент ДО этого узла — нужен только для
@@ -78,7 +115,7 @@ def generate_node(node: SceneNode, indent: int = 1, active_sprites: Optional[Dic
 
     if t == NodeType.COMMENT:
         if node.comment_text:
-            lines.append(f"{pad}# {node.comment_text}")
+            lines.append(f"{pad}{COMMENT_PREFIX} {node.comment_text}")
     elif t == NodeType.LABEL:
         lines.append("")
         lines.append(f"label {node.label_name}:")
@@ -103,15 +140,15 @@ def generate_node(node: SceneNode, indent: int = 1, active_sprites: Optional[Dic
         if node.cg_var:
             lines.append(f"{pad}hide {node.cg_var} with dissolve")
     elif t == NodeType.SHOW_SPRITE:
-        # Одиночный показ (не часть группы подряд идущих show_sprite) —
-        # рендерится тем же кодом, что и группа из одного элемента.
+                                                                       
+                                                                   
         lines.extend(_render_sprite_group([node], pad))
     elif t == NodeType.HIDE_SPRITE:
         if node.hide_group and active_sprites is not None:
-            # Скрыть любой активный тег, принадлежащий папке персонажа hide_group
+                                                                                 
             tags = [tag for tag, group in active_sprites.items() if group == node.hide_group]
             for tag in tags:
-                lines.append(f"{pad}hide {tag} with dspr")
+                lines.append(f"{pad}hide {tag} with dissolve")
         else:
             tag = node.sprite_tag or node.sprite_var or ""
             if not node.sprite_tag and rm is not None and node.sprite_var:
@@ -119,15 +156,29 @@ def generate_node(node: SceneNode, indent: int = 1, active_sprites: Optional[Dic
                 if composite is not None:
                     tag = composite.character
             if tag:
-                lines.append(f"{pad}hide {tag} with dspr")
+                lines.append(f"{pad}hide {tag} with dissolve")
     elif t == NodeType.PLAY_MUSIC:
         if node.music_var:
-            fadeout = f" fadeout {node.music_fadeout}" if node.music_fadeout else ""
-            fadein = f" fadein {node.music_fadein}" if node.music_fadein else ""
+            fadeout = f" fadeout {_fmt_seconds(node.music_fadeout)}" if node.music_fadeout else ""
+            fadein = f" fadein {_fmt_seconds(node.music_fadein)}" if node.music_fadein else ""
             lines.append(f"{pad}play music {node.music_var}{fadeout}{fadein}")
     elif t == NodeType.STOP_MUSIC:
-        fadeout = f" fadeout {node.music_fadeout}" if node.music_fadeout else ""
+        fadeout = f" fadeout {_fmt_seconds(node.music_fadeout)}" if node.music_fadeout else ""
         lines.append(f"{pad}stop music{fadeout}")
+    elif t == NodeType.PLAY_AMBIENCE:
+        if node.ambience_var:
+            fadeout = f" fadeout {_fmt_seconds(node.ambience_fadeout)}" if node.ambience_fadeout else ""
+            fadein = f" fadein {_fmt_seconds(node.ambience_fadein)}" if node.ambience_fadein else ""
+            lines.append(f"{pad}play ambience {node.ambience_var}{fadeout}{fadein}")
+    elif t == NodeType.STOP_AMBIENCE:
+        fadeout = f" fadeout {_fmt_seconds(node.ambience_fadeout)}" if node.ambience_fadeout else ""
+        lines.append(f"{pad}stop ambience{fadeout}")
+    elif t == NodeType.WINDOW:
+        trans = f" with {node.transition}" if node.transition else ""
+        lines.append(f"{pad}window {node.window_action}{trans}")
+    elif t == NodeType.WITH_TRANSITION:
+        if node.transition:
+            lines.append(f"{pad}with {node.transition}")
     elif t == NodeType.PLAY_SOUND:
         if node.sound_var:
             lines.append(f"{pad}play sound {node.sound_var}")
@@ -155,10 +206,15 @@ def generate_node(node: SceneNode, indent: int = 1, active_sprites: Optional[Dic
         lines.append(f'{pad}menu:')
         if prompt:
             lines.append(f'{pad}{INDENT}"{prompt}"')
-        for ct, cj, use_call in node.normalized_menu_choices():
+        for ct, cj, use_call, raw_body in node.normalized_menu_choices():
             ct = ct.replace('"', '\\"')
             lines.append(f'{pad}{INDENT}"{ct}":')
-            if cj:
+            if raw_body and raw_body.strip():
+                                                                         
+                                                          
+                for bl in raw_body.splitlines():
+                    lines.append(f'{pad}{INDENT}{INDENT}{bl}' if bl.strip() else '')
+            elif cj:
                 kw = "call" if use_call else "jump"
                 lines.append(f'{pad}{INDENT}{INDENT}{kw} {cj}')
             else:
@@ -170,7 +226,31 @@ def generate_node(node: SceneNode, indent: int = 1, active_sprites: Optional[Dic
         else:
             lines.append(f"{pad}python:")
             for cl in code_lines:
-                lines.append(f"{pad}{INDENT}{cl}")
+                lines.append(f"{pad}{INDENT}{cl}" if cl.strip() else "")
+    elif t == NodeType.RAW:
+        for cl in node.python_code.splitlines():
+            lines.append(f"{pad}{cl}" if cl.strip() else "")
+    elif t == NodeType.CUSTOM:
+        lines.extend(_render_custom_node(node, pad, custom_templates))
+    return lines
+
+
+def _render_custom_node(node: SceneNode, pad: str, custom_templates: Optional[CustomNodeTemplateStore]) -> List[str]:
+    """Рендерит пользовательскую ноду (см. core/custom_node_templates.py) по
+    её Jinja2-шаблону кода. Если хранилище шаблонов не передано, шаблон не
+    найден или Jinja2 не установлен — выводит предупреждающий комментарий
+    вместо кода (чтобы не потерять ноду молча)."""
+    if custom_templates is None:
+        return [f"{pad}{COMMENT_PREFIX} [пользовательская нода: хранилище шаблонов недоступно]"]
+    tmpl = custom_templates.get(node.custom_template_id)
+    if tmpl is None:
+        return [f"{pad}{COMMENT_PREFIX} [пользовательская нода: шаблон '{node.custom_template_id}' не найден]"]
+    rendered = custom_templates.render(tmpl, node.custom_params, pad=pad)
+    if rendered is None:
+        return [f"{pad}{COMMENT_PREFIX} [пользовательская нода '{tmpl.name}': Jinja2 не установлен]"]
+    lines = []
+    for line in rendered.splitlines():
+        lines.append(line if line.strip() else "")
     return lines
 
 
@@ -203,26 +283,51 @@ def _update_active_sprites(active_sprites: Dict[str, str], node: SceneNode, rm=N
             active_sprites.pop(tag, None)
 
 
-def _group_consecutive_sprites(nodes: List[SceneNode]) -> List[List[SceneNode]]:
-    """Разбивает список узлов сцены на 'единицы рендеринга': подряд идущие
-    SHOW_SPRITE с ОДИНАКОВЫМ transition склеиваются в одну группу (общий
-    with-блок), любой другой узел (включая SHOW_SPRITE с другим переходом)
-    начинает новую единицу."""
+def _group_with_runs(nodes: List[SceneNode]) -> List[List[SceneNode]]:
+    """Разбивает список узлов сцены на единицы рендеринга, обобщая
+    _group_consecutive_sprites на ЛЮБЫЕ группируемые типы, а не только
+    show_sprite: подряд идущие ноды из _GROUPABLE_TRANSITION_TYPES с
+    ОДИНАКОВЫМ непустым transition объединяются в один блок с единственным
+    общим 'with X' в конце.
+
+    Это нужно, чтобы при обратной генерации .rpy
+
+        window hide
+        scene black
+        with dissolve
+
+    не превращалось в семантически другой код
+
+        window hide with dissolve
+        scene black with dissolve
+
+    (два последовательных перехода вместо одного общего — на импорте
+    rpy_script_import.py кладёт оба узла в очередь 'pending' и присваивает
+    им один и тот же transition, см. _PENDING_TRANSITION_TYPES; здесь это
+    собирается обратно в исходную форму)."""
     units: List[List[SceneNode]] = []
-    current_group: List[SceneNode] = []
+    current: List[SceneNode] = []
+
+    def is_groupable(node: SceneNode) -> bool:
+        if node.node_type not in _GROUPABLE_TRANSITION_TYPES:
+            return False
+        if not node.transition:
+            return False
+        if node.node_type == NodeType.SHOW_SPRITE and not node.sprite_var:
+            return False
+        return True
 
     def flush():
-        if current_group:
-            units.append(list(current_group))
-            current_group.clear()
+        if current:
+            units.append(list(current))
+            current.clear()
 
     for node in nodes:
-        if node.node_type == NodeType.SHOW_SPRITE and node.sprite_var:
-            if current_group and current_group[-1].transition == node.transition:
-                current_group.append(node)
-            else:
-                flush()
-                current_group.append(node)
+        if is_groupable(node) and current and current[-1].transition == node.transition:
+            current.append(node)
+        elif is_groupable(node):
+            flush()
+            current.append(node)
         else:
             flush()
             units.append([node])
@@ -230,14 +335,14 @@ def _group_consecutive_sprites(nodes: List[SceneNode]) -> List[List[SceneNode]]:
     return units
 
 
-def generate_full_script(project: Project, rm=None) -> str:
+def generate_full_script(project: Project, rm=None, custom_templates: Optional[CustomNodeTemplateStore] = None) -> str:
     lines = [
-        f"# Сценарий: {project.title}",
-        f"# Сгенерировано RenPy Visual Editor",
+        f"{COMMENT_PREFIX} Сценарий: {project.title}",
+        f"{COMMENT_PREFIX} Сгенерировано RenPy Visual Editor",
         "",
     ]
     if project.characters:
-        lines.append("# ===== Персонажи =====")
+        lines.append(f"{COMMENT_PREFIX} ===== Персонажи =====")
         for ch in project.characters:
             lines.append(ch.to_renpy())
         lines.append("")
@@ -245,18 +350,19 @@ def generate_full_script(project: Project, rm=None) -> str:
     lines.append(f"label {project.label_name}:")
     lines.append("")
     for scene in project.scenes:
-        lines.append(f"{INDENT}# --- {scene.name} ---")
+        lines.append(f"{INDENT}{COMMENT_PREFIX} --- {scene.name} ---")
         active_sprites: Dict[str, str] = {}
-        for unit in _group_consecutive_sprites(scene.nodes):
+        for unit in _group_with_runs(scene.nodes):
             if len(unit) > 1:
-                # Группа из нескольких подряд идущих show_sprite с одинаковым
-                # переходом — единый with-блок на всех.
-                lines.extend(_render_sprite_group(unit, INDENT))
+                for node in unit:
+                    lines.extend(_render_node_no_transition(node, INDENT))
+                lines.append(f"{INDENT}with {unit[0].transition}")
                 for node in unit:
                     _update_active_sprites(active_sprites, node, rm=rm)
             else:
                 node = unit[0]
-                lines.extend(generate_node(node, indent=1, active_sprites=active_sprites, rm=rm))
+                lines.extend(generate_node(node, indent=1, active_sprites=active_sprites, rm=rm,
+                                            custom_templates=custom_templates))
                 _update_active_sprites(active_sprites, node, rm=rm)
         lines.append("")
     lines.append(f"{INDENT}return")
