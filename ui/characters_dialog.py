@@ -1,3 +1,4 @@
+                       
 import re
 import json
 from dataclasses import asdict
@@ -54,7 +55,7 @@ class CharacterEditWidget(QGroupBox):
         bright = (c.red()*299 + c.green()*587 + c.blue()*114) / 1000 > 128
         self.color_btn.setStyleSheet(
             f"background:{self._color}; color:{'#000' if bright else '#fff'}; "
-            "border:1px solid #3a3a4a; border-radius:4px;"
+            "border:1px solid #3a3a46; border-radius:4px;"
         )
 
     def load(self, ch: Character):
@@ -117,6 +118,7 @@ class CharactersDialog(QDialog):
 
         self.btn_reset = QPushButton("🗑 Сбросить список")
         self.btn_reset.setToolTip("Удалить ВСЕХ персонажей из текущего проекта.")
+        self.btn_reset.setObjectName("btn_secondary")
         self.btn_reset.clicked.connect(self._reset_characters)
         left.addWidget(self.btn_reset)
 

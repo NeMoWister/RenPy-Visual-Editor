@@ -1,9 +1,9 @@
+                       
 import os, json, re
 from typing import Dict, List, Optional
 from dataclasses import dataclass, field, asdict
 from core.composite_sprite_parser import CompositeSprite, parse_sprites_rpy_file
-from paths import BASE_DIR, CONFIG_FILE
-from pathlib import Path
+from core.unified_config import load_section, save_section
 
 IMAGE_EXTS = {'.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif'}
 AUDIO_EXTS = {'.mp3', '.ogg', '.wav', '.flac', '.opus'}
@@ -28,9 +28,9 @@ class ResourceEntry:
     filename: str
     display_name: str
     category: str
-    group_path: str = ""  # подпапка внутри категории, например "us/normal" для sprites/us/normal/smile.png ("" — файл лежит прямо в корне категории)
-    source: str = "custom"  # "default" | "custom" — из какой из двух корневых папок ресурс пришёл
-    game_path: str = ""  # путь относительно папки игры в Ren'Py, например "bg/forest.png" (без префикса source/ — используется в image/define)
+    group_path: str = ""                                                                                                                             
+    source: str = "custom"                                                                        
+    game_path: str = ""                                                                                                                        
 
     def group_parts(self) -> List[str]:
         return [p for p in self.group_path.split('/') if p]
@@ -50,34 +50,31 @@ class ResourcesConfig:
 
 class ResourceManager:
     CATEGORIES = {
-        'bg':      ('Фоны (BG)',  IMAGE_EXTS),
-        'cg':      ('CG',         IMAGE_EXTS),
-        'sprites': ('Спрайты',    IMAGE_EXTS),
-        'music':   ('Музыка',     AUDIO_EXTS),
-        'sounds':  ('Звуки',      AUDIO_EXTS),
+        'bg':       ('Фоны (BG)',  IMAGE_EXTS),
+        'cg':       ('CG',         IMAGE_EXTS),
+        'sprites':  ('Спрайты',    IMAGE_EXTS),
+        'music':    ('Музыка',     AUDIO_EXTS),
+        'sounds':   ('Звуки',      AUDIO_EXTS),
+        'ambience': ('Эмбиенс',    AUDIO_EXTS),
     }
     RENPY_PREFIX = {
         'bg': 'bg', 'cg': 'cg', 'sprites': '',
-        'music': '', 'sounds': 'sfx_',
+        'music': '', 'sounds': 'sfx_', 'ambience': '',
     }
-    # Категории, где допускаются вложенные папки (произвольная глубина),
-    # например resources/sprites/<персонаж>/<вариация>/<файл>.png
+                                                                        
+                                                                 
     NESTED_CATEGORIES = {'sprites'}
 
     def __init__(self, base_dir: str):
         self.base_dir = base_dir
-        
-        self.base_dir = str(BASE_DIR)
-        self.config_path = str(CONFIG_FILE)
         self.config = self._load_config()
         self.resources: Dict[str, List[ResourceEntry]] = {cat: [] for cat in self.CATEGORIES}
         self.composite_sprites: List[CompositeSprite] = []
 
     def _load_config(self) -> ResourcesConfig:
-        if os.path.exists(self.config_path):
+        data = load_section(self.base_dir, "resources")
+        if data:
             try:
-                with open(self.config_path, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
                 cfg = ResourcesConfig()
                 cfg.resources_path = data.get('resources_path', 'resources')
                 for k, v in data.get('overrides', {}).items():
@@ -92,8 +89,7 @@ class ResourceManager:
             'resources_path': self.config.resources_path,
             'overrides': {k: asdict(v) for k, v in self.config.overrides.items()}
         }
-        with open(self.config_path, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+        save_section(self.base_dir, "resources", data)
 
     def export_overrides(self, path: str):
         """Сохраняет ТОЛЬКО переопределения имён (без пути к ресурсам, который
@@ -123,21 +119,54 @@ class ResourceManager:
         self.config.overrides.update(loaded)
         return len(loaded)
 
-    
-
-    def get_resources_root(self):
-        p = Path(self.config.resources_path)
-
-        if p.is_absolute():
-            return str(p)
-
-        return str(BASE_DIR / p)
+    def get_resources_root(self) -> str:
+        if os.path.isabs(self.config.resources_path):
+            return self.config.resources_path
+        return os.path.join(self.base_dir, self.config.resources_path)
 
     def get_source_root(self, source: str) -> str:
         """Корень конкретного источника, например resources/default или
         resources/custom. Структура внутри идентична: <source>/bg/, /cg/,
         /sprites/, /music/, /sounds/."""
         return os.path.join(self.get_resources_root(), source)
+
+    def import_local_file(self, category: str, src_path: str) -> Optional['ResourceEntry']:
+        """Копирует файл с диска (например, перетащенный из проводника) в
+        resources/custom/<category>/ под его собственным именем (при
+        конфликте имён добавляет суффикс _2, _3...), затем пересканирует
+        ресурсы. Возвращает новую запись ResourceEntry или None, если
+        расширение не подходит категории."""
+        if category not in self.CATEGORIES:
+            return None
+        _, exts = self.CATEGORIES[category]
+        ext = os.path.splitext(src_path)[1].lower()
+        if ext not in exts:
+            return None
+
+        dest_dir = os.path.join(self.get_source_root("custom"), category)
+        os.makedirs(dest_dir, exist_ok=True)
+
+        base_name = os.path.basename(src_path)
+        stem, ext = os.path.splitext(base_name)
+        dest_name = base_name
+        counter = 2
+        while os.path.exists(os.path.join(dest_dir, dest_name)):
+            dest_name = f"{stem}_{counter}{ext}"
+            counter += 1
+
+        dest_path = os.path.join(dest_dir, dest_name)
+        try:
+            import shutil
+            shutil.copy2(src_path, dest_path)
+        except OSError as e:
+            print(f"Не удалось скопировать файл ресурса: {e}")
+            return None
+
+        self.scan()
+        for entry in self.resources.get(category, []):
+            if os.path.normcase(os.path.normpath(entry.abs_path)) == os.path.normcase(os.path.normpath(dest_path)):
+                return entry
+        return None
 
     def scan(self):
         for cat, (_, exts) in self.CATEGORIES.items():
@@ -220,11 +249,11 @@ class ResourceManager:
 
     def _make_entry(self, cat: str, dir_abs: str, fn: str, group_path: str, source: str) -> ResourceEntry:
         abs_path = os.path.join(dir_abs, fn)
-        # rel_path хранится с префиксом source — нужен как уникальный ключ
-        # overrides (иначе одинаковые относительные пути в default/ и
-        # custom/ были бы неразличимы). game_path — путь БЕЗ префикса
-        # source, ровно такой, какой должен попасть в сгенерированный код
-        # (файлы физически копируются/совмещаются в общую папку игры).
+                                                                          
+                                                                     
+                                                                     
+                                                                         
+                                                                      
         game_path = os.path.relpath(abs_path, self.get_source_root(source)).replace('\\', '/')
         rel_path = f"{source}/{game_path}"
         override = self.config.overrides.get(rel_path, ResourceConfig())
@@ -260,7 +289,7 @@ class ResourceManager:
             parts = [p for p in group_path.split('/') if p and p != '.']
             name_parts = [filename_to_var(p) for p in parts] + [name]
             return "_".join(name_parts)
-        # sounds (и любая прочая будущая категория без особого формата)
+                                                                       
         return self.RENPY_PREFIX.get(cat, '') + name
 
     def get(self, category: str) -> List[ResourceEntry]:
@@ -341,12 +370,12 @@ class ResourceManager:
     def generate_define_block(self) -> str:
         lines = ["# ===== Определения ресурсов =====", ""]
         for cat, entries in self.resources.items():
-            # В define/image попадают только ресурсы из custom/ — те, что
-            # лежат в default/, считаются уже объявленными где-то ещё
-            # (например встроены в базовый шаблон проекта) и не дублируются.
-            # music исключена полностью: там var_name это music_list["..."] —
-            # ссылка на словарь треков, который уже существует в проекте
-            # Ren'Py, а не переменная, которую нам нужно объявлять.
+                                                                         
+                                                                     
+                                                                            
+                                                                             
+                                                                        
+                                                                   
             if cat == 'music':
                 continue
             custom_entries = [e for e in entries if e.source == "custom"]

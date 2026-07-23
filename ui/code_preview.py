@@ -1,9 +1,10 @@
+                       
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton,
-    QPlainTextEdit, QFileDialog, QMessageBox, QTabWidget
+    QPlainTextEdit, QFileDialog, QMessageBox, QTabWidget, QLabel, QSlider
 )
 from PyQt6.QtGui import QFont, QSyntaxHighlighter, QTextCharFormat, QColor
-from PyQt6.QtCore import QRegularExpression
+from PyQt6.QtCore import QRegularExpression, Qt
 
 
 class RenPyHighlighter(QSyntaxHighlighter):
@@ -18,7 +19,7 @@ class RenPyHighlighter(QSyntaxHighlighter):
             self.rules.append((QRegularExpression(pattern), fmt))
         for kw in ["label","scene","show","hide","play","stop","pause","jump","menu",
                    "python","define","image","with","music","sound","dissolve","fade","return","call"]:
-            add(rf'\b{kw}\b', "#ff8c00", bold=True)
+            add(rf'\b{kw}\b', "#ff8c3d", bold=True)
         add(r'"[^"]*"', "#98c379")
         add(r'#.*$', "#5c6370", italic=True)
         add(r'\b\d+\.?\d*\b', "#d19a66")
@@ -40,6 +41,21 @@ class CodePreviewDialog(QDialog):
         self.setWindowTitle("Сгенерированный код Ren'Py")
         self.setMinimumSize(800, 600)
         layout = QVBoxLayout(self)
+
+        font_row = QHBoxLayout()
+        font_row.addWidget(QLabel("Размер шрифта:"))
+        self.font_slider = QSlider(Qt.Orientation.Horizontal)
+        self.font_slider.setRange(8, 24)
+        self.font_slider.setValue(11)
+        self.font_slider.setFixedWidth(140)
+        self.font_slider.valueChanged.connect(self._on_font_size_changed)
+        font_row.addWidget(self.font_slider)
+        self.font_size_lbl = QLabel("11")
+        self.font_size_lbl.setFixedWidth(24)
+        font_row.addWidget(self.font_size_lbl)
+        font_row.addStretch()
+        layout.addLayout(font_row)
+
         tabs = QTabWidget()
         self.full_editor = QPlainTextEdit()
         self.full_editor.setFont(QFont("Courier New", 11))
@@ -66,6 +82,12 @@ class CodePreviewDialog(QDialog):
         btn_row.addStretch()
         btn_row.addWidget(btn_close)
         layout.addLayout(btn_row)
+
+    def _on_font_size_changed(self, value: int):
+        self.font_size_lbl.setText(str(value))
+        self.full_editor.setFont(QFont("Courier New", value))
+        if hasattr(self, "def_editor"):
+            self.def_editor.setFont(QFont("Courier New", value))
 
     def _copy(self):
         from PyQt6.QtWidgets import QApplication

@@ -1,3 +1,4 @@
+                       
 """
 Парсер составных спрайтов Ren'Py вида:
 
@@ -37,20 +38,20 @@ _SIZE_RE = re.compile(r'^\s*\((\d+)\s*,\s*(\d+)\)\s*,(.*)$', re.DOTALL)
 class SpriteLayerDef:
     offset_x: int
     offset_y: int
-    rel_path: str  # путь относительно resources/sprites/, например "far/cs/cs_1_body.png"
+    rel_path: str                                                                         
 
 
 @dataclass
 class CompositeSprite:
-    full_name: str               # имя как в файле, например "cs normal stethoscope far"
-    character: str               # первое слово, например "cs"
-    variant_parts: List[str]     # средние слова без позиции, например ["normal", "stethoscope"]
-    position: str                # "far" | "close" | "normal"
+    full_name: str                                                                      
+    character: str                                            
+    variant_parts: List[str]                                                                    
+    position: str                                            
     width: int
     height: int
     layers: List[SpriteLayerDef] = field(default_factory=list)
-    source_line: int = 0         # номер строки в sprites.rpy (для диагностики/повторной генерации)
-    source: str = "custom"       # "default" | "custom" — из какого sprites.rpy спрайт распознан
+    source_line: int = 0                                                                           
+    source: str = "custom"                                                                      
 
     @property
     def display_name(self) -> str:
@@ -77,7 +78,7 @@ def _extract_last_composite(block: str):
                 break
         j += 1
     else:
-        return None  # не нашли закрывающую скобку — повреждённый/неожиданный синтаксис
+        return None                                                                    
 
     inner = block[open_paren + 1:j]
     size_m = _SIZE_RE.match(inner)
@@ -128,17 +129,17 @@ def parse_sprites_rpy(text: str, source: str = "custom") -> List[CompositeSprite
         character = words[0]
         rest_words = words[1:]
 
-        # Позиция определяется по реальному пути первого слоя (надёжнее, чем
-        # угадывать по последнему слову имени — слова вроде "body"/"red" не
-        # являются позицией, хотя стоят на похожем месте).
+                                                                            
+                                                                           
+                                                          
         first_layer_path = _strip_sprites_prefix(raw_layers[0][2])
         position = "normal"
         path_parts = first_layer_path.split('/')
         if path_parts and path_parts[0] in POSITIONS:
             position = path_parts[0]
 
-        # Если последнее слово имени совпадает с найденной позицией — это и
-        # есть суффикс позиции, убираем его из "состава" (variant_parts).
+                                                                           
+                                                                         
         if rest_words and rest_words[-1] == position:
             variant_parts = rest_words[:-1]
         else:
