@@ -1,11 +1,11 @@
 """
-Диалог «Настройки редактора» — горячие клавиши для частых операций
+Диалог «Настройки редактора» - горячие клавиши для частых операций
 (добавление нод) и настройки автосохранения.
 """
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTableWidget,
     QTableWidgetItem, QHeaderView, QMessageBox, QTabWidget, QWidget,
-    QCheckBox, QSpinBox, QKeySequenceEdit
+    QCheckBox, QSpinBox, QKeySequenceEdit, QRadioButton, QButtonGroup, QGroupBox
 )
 from PyQt6.QtGui import QKeySequence
 from PyQt6.QtCore import Qt
@@ -36,6 +36,10 @@ class EditorSettingsDialog(QDialog):
         autosave_tab = QWidget()
         tabs.addTab(autosave_tab, "💾 Автосохранение")
         self._setup_autosave_tab(autosave_tab)
+
+        codegen_tab = QWidget()
+        tabs.addTab(codegen_tab, "📝 Генерация кода")
+        self._setup_codegen_tab(codegen_tab)
 
         bottom = QHBoxLayout()
         bottom.addStretch()
@@ -143,9 +147,57 @@ class EditorSettingsDialog(QDialog):
         layout.addWidget(info)
         layout.addStretch()
 
+    def _setup_codegen_tab(self, tab: QWidget):
+        layout = QVBoxLayout(tab)
+
+        box = QGroupBox("Переключение NVL/ADV (нода «📖 Режим NVL/ADV»)")
+        bl = QVBoxLayout(box)
+        self.nvl_style_group = QButtonGroup(box)
+
+        self.nvl_style_character_rb = QRadioButton(
+            "Через персонажа-компаньона (по умолчанию)"
+        )
+        self.nvl_style_function_rb = QRadioButton(
+            "Через $ set_mode_nvl() / $ set_mode_adv()"
+        )
+        self.nvl_style_group.addButton(self.nvl_style_character_rb, 0)
+        self.nvl_style_group.addButton(self.nvl_style_function_rb, 1)
+        if self.app_settings.nvl_codegen_style == "function":
+            self.nvl_style_function_rb.setChecked(True)
+        else:
+            self.nvl_style_character_rb.setChecked(True)
+        bl.addWidget(self.nvl_style_character_rb)
+
+        char_info = QLabel(
+            "Для каждого персонажа автоматически генерируется NVL-версия "
+            "(define ..._nvl = Character(..., kind=nvl.NVLCharacter)), реплики "
+            "в NVL-режиме говорят через неё, вход/очистка - через nvl clear."
+        )
+        char_info.setWordWrap(True)
+        char_info.setStyleSheet("color:#888; font-size:11px; margin-left:20px;")
+        bl.addWidget(char_info)
+
+        bl.addWidget(self.nvl_style_function_rb)
+        fn_info = QLabel(
+            "Реплики остаются обычными (var \"текст\"), а вход/выход из NVL "
+            "превращается в $ set_mode_nvl() / $ set_mode_adv() - эти функции "
+            "нужно определить самостоятельно в проекте (редактор их не создаёт). "
+            "«Очистить экран NVL» по-прежнему даёт nvl clear в обоих вариантах. "
+            "При импорте .rpy обратно оба варианта распознаются автоматически."
+        )
+        fn_info.setWordWrap(True)
+        fn_info.setStyleSheet("color:#888; font-size:11px; margin-left:20px;")
+        bl.addWidget(fn_info)
+
+        layout.addWidget(box)
+        layout.addStretch()
+
     def _save_and_close(self):
         self.hotkey_store.save(self.base_dir)
         self.app_settings.autosave_enabled = self.autosave_check.isChecked()
         self.app_settings.autosave_interval_sec = self.interval_spin.value()
+        self.app_settings.nvl_codegen_style = (
+            "function" if self.nvl_style_function_rb.isChecked() else "character"
+        )
         self.app_settings.save(self.base_dir)
         self.accept()

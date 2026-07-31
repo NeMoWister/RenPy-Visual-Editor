@@ -28,6 +28,7 @@ class NodeType(Enum):
     COMMENT = "comment"
     WINDOW = "window"
     WITH_TRANSITION = "with_transition"
+    NVL_MODE = "nvl_mode"
                                                                          
                                                                           
                                                                  
@@ -45,6 +46,12 @@ class Character:
 
     def to_renpy(self) -> str:
         return f'define {self.variable} = Character("{self.name}", color="{self.color}")'
+
+    def to_renpy_nvl(self) -> str:
+        """Компаньон-персонаж для NVL-режима (kind=nvl.NVLCharacter) -
+        генерируется дополнительно к обычному define, если в проекте есть
+        хотя бы одна NVL_MODE-нода (см. code_generator.py)."""
+        return f'define {self.variable}_nvl = Character("{self.name}", color="{self.color}", kind=nvl.NVLCharacter)'
 
 
 @dataclass
@@ -82,13 +89,13 @@ NAMED_SPRITE_POSITIONS = {
                                                                                
                                                                                 
 ANCHOR_POSITIONS = [
-    ("fleft",  "fleft — крайний левый край"),
-    ("left",   "left — левее центра"),
-    ("cleft",  "cleft — чуть левее центра"),
-    ("center", "center — центр"),
-    ("cright", "cright — чуть правее центра"),
-    ("right",  "right — правее центра"),
-    ("fright", "fright — крайний правый край"),
+    ("fleft",  "fleft - крайний левый край"),
+    ("left",   "left - левее центра"),
+    ("cleft",  "cleft - чуть левее центра"),
+    ("center", "center - центр"),
+    ("cright", "cright - чуть правее центра"),
+    ("right",  "right - правее центра"),
+    ("fright", "fright - крайний правый край"),
 ]
 
 
@@ -151,12 +158,29 @@ class SceneNode:
     color_tag: Optional[str] = None                                                               
     custom_template_id: str = ""
     custom_params: dict = field(default_factory=dict)
+                                                                           
+                                                                      
+                                                                   
+                                                                       
+                                                                    
+    import_warning: str = ""
+                                                                         
+                                                                      
+    nvl_action: str = "enter"
                                                                        
                                                                       
 
     def normalized_menu_choices(self):
-        """Возвращает menu_choices в едином виде (text, jump, use_call, raw_body),
-        совместимо со старым форматом (2- и 3-элементные кортежи без raw_body)."""
+        """Возвращает menu_choices в едином виде (text, jump, use_call, raw_body, nodes),
+        совместимо со старым форматом (2- и 3-элементные кортежи без raw_body/nodes).
+
+        nodes - список вложенных SceneNode (полноценный мини-сценарий ветки).
+        Если у выбранной ветки есть nodes - при генерации кода они имеют
+        приоритет над raw_body и jump/call (см. code_generator.generate_node).
+        Для dict-элементов список nodes читается/пишется ПО ССЫЛКЕ на тот же
+        объект, что лежит в исходном словаре - так UI редактор веток может
+        мутировать список in-place, и изменения сами долетают до
+        self.menu_choices без отдельного шага "сохранить обратно"."""
         result = []
         for ch in self.menu_choices:
             if isinstance(ch, dict):
@@ -164,15 +188,21 @@ class SceneNode:
                 jump = ch.get("jump", "")
                 use_call = ch.get("use_call", False)
                 raw_body = ch.get("raw_body", "")
-            elif len(ch) >= 4:
-                text, jump, use_call, raw_body = ch[0], ch[1], ch[2], ch[3]
+                if "nodes" not in ch:
+                    ch["nodes"] = []
+                nodes = ch["nodes"]
+            elif len(ch) >= 5:
+                text, jump, use_call, raw_body, nodes = ch[0], ch[1], ch[2], ch[3], ch[4]
+            elif len(ch) == 4:
+                text, jump, use_call, raw_body, nodes = ch[0], ch[1], ch[2], ch[3], []
             elif len(ch) == 3:
-                text, jump, use_call, raw_body = ch[0], ch[1], ch[2], ""
+                text, jump, use_call, raw_body, nodes = ch[0], ch[1], ch[2], "", []
             elif len(ch) == 2:
-                text, jump, use_call, raw_body = ch[0], ch[1], False, ""
+                text, jump, use_call, raw_body, nodes = ch[0], ch[1], False, "", []
             else:
-                text, jump, use_call, raw_body = (ch[0] if ch else ""), "", False, ""
-            result.append((text, jump, bool(use_call), raw_body or ""))
+                text, jump, use_call, raw_body, nodes = (ch[0] if ch else ""), "", False, "", []
+            result.append((text, jump, bool(use_call), raw_body or "",
+                           nodes if nodes is not None else []))
         return result
 
     @property
@@ -202,8 +232,8 @@ class SceneNode:
     @property
     def hide_var(self):
         """Используется GUI-каруселью как 'текущий выбор' для подсветки.
-        Если выбрана конкретная картинка — возвращает её var_name (sprite_tag).
-        Если выбрана целая папка персонажа — возвращает None, чтобы карусель
+        Если выбрана конкретная картинка - возвращает её var_name (sprite_tag).
+        Если выбрана целая папка персонажа - возвращает None, чтобы карусель
         не пыталась подсветить файл (подсветка папки делается отдельно)."""
         return self.sprite_tag
 
@@ -248,25 +278,25 @@ class SceneNode:
             txt = self.text[:50] + ("…" if len(self.text) > 50 else "")
             return f'📖 {txt}'
         elif t == NodeType.SHOW_BG:
-            return f'🖼 Фон: {self.bg_var or "—"}  [{self.transition}]'
+            return f'🖼 Фон: {self.bg_var or "-"}  [{self.transition}]'
         elif t == NodeType.SCENE:
-            return f'🎬 Сцена: {self.bg_var or "—"}  [{self.transition}]'
+            return f'🎬 Сцена: {self.bg_var or "-"}  [{self.transition}]'
         elif t == NodeType.SHOW_SPRITE:
             expr = f" ({self.sprite_expression})" if self.sprite_expression else ""
             trans = f"  [{self.transition}]" if self.transition else "  [без перехода]"
-            return f'👤 Спрайт: {self.sprite_var or "—"}{expr}{trans}'
+            return f'👤 Спрайт: {self.sprite_var or "-"}{expr}{trans}'
         elif t == NodeType.HIDE_SPRITE:
             if self.hide_group:
                 return f'👻 Скрыть: персонаж «{self.hide_group}» (все спрайты)'
-            return f'👻 Скрыть: {self.sprite_tag or self.sprite_var or "—"}'
+            return f'👻 Скрыть: {self.sprite_tag or self.sprite_var or "-"}'
         elif t == NodeType.PLAY_MUSIC:
-            return f'🎵 Музыка: {self.music_var or "—"}'
+            return f'🎵 Музыка: {self.music_var or "-"}'
         elif t == NodeType.STOP_MUSIC:
             return f'🔇 Стоп музыка'
         elif t == NodeType.PLAY_SOUND:
-            return f'🔊 Звук: {self.sound_var or "—"}'
+            return f'🔊 Звук: {self.sound_var or "-"}'
         elif t == NodeType.SHOW_CG:
-            return f'🖼 CG: {self.cg_var or "—"}'
+            return f'🖼 CG: {self.cg_var or "-"}'
         elif t == NodeType.HIDE_CG:
             return f'🗑 Скрыть CG'
         elif t == NodeType.LABEL:
@@ -290,11 +320,14 @@ class SceneNode:
             trans = f"  [{self.transition}]" if self.transition else ""
             return f'🪟 Текстовое окно: {action}{trans}'
         elif t == NodeType.PLAY_AMBIENCE:
-            return f'🌬 Эмбиенс: {self.ambience_var or "—"}'
+            return f'🌬 Эмбиенс: {self.ambience_var or "-"}'
         elif t == NodeType.STOP_AMBIENCE:
             return f'🔇 Стоп эмбиенс'
         elif t == NodeType.WITH_TRANSITION:
-            return f'✨ Эффект: with {self.transition or "—"}'
+            return f'✨ Эффект: with {self.transition or "-"}'
+        elif t == NodeType.NVL_MODE:
+            labels = {"enter": "📖 Войти в NVL-режим", "clear": "📖 Очистить экран NVL", "exit": "💬 Вернуться в ADV"}
+            return labels.get(self.nvl_action, "📖 NVL")
         elif t == NodeType.RAW:
             code_short = self.python_code[:50].replace('\n', ' ⏎ ')
             return f'🧩 Импорт (неразпознано): {code_short}'

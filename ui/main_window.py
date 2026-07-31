@@ -9,9 +9,9 @@ from PyQt6.QtWidgets import (
     QLabel, QPushButton, QListWidget, QListWidgetItem, QGroupBox,
     QToolBar, QStatusBar, QFileDialog, QMessageBox, QInputDialog,
     QScrollArea, QFrame, QLineEdit, QDialog, QStyle, QSlider, QStackedWidget,
-    QAbstractItemView, QMenu, QColorDialog
+    QAbstractItemView, QMenu, QColorDialog, QProgressDialog
 )
-from PyQt6.QtCore import Qt, QSize, pyqtSignal, QTimer
+from PyQt6.QtCore import Qt, QSize, pyqtSignal, QTimer, QThread
 from PyQt6.QtGui import QAction, QKeySequence, QIcon, QFont, QColor, QBrush, QPainter, QShortcut
 
 from core.models import Project, Scene, SceneNode, NodeType, Character
@@ -20,6 +20,7 @@ from core.project_manager import ProjectManager, project_to_dict, project_from_d
 from core.undo_manager import UndoManager
 from core.code_generator import generate_full_script, generate_defines_only
 from core.scene_state import compute_state_up_to
+from core import presentation_engine
 
 from ui.glass_panel import GlassPanel
 from ui.node_editor import NodeEditor
@@ -48,6 +49,8 @@ from core.autosave import write_autosave, read_autosave, has_autosave, clear_aut
 from ui.editor_settings_dialog import EditorSettingsDialog
 from ui.history_panel_dialog import HistoryPanelDialog
 from ui.diff_preview_dialog import DiffPreviewDialog
+from ui.split_export_dialog import SplitExportDialog
+from ui.command_palette import CommandPaletteDialog, collect_commands_from_menubar
 from ui.git_dialog import GitPanelDialog
 from ui.import_script_dialog import ImportScriptDialog
 from PyQt6.QtGui import QPixmap
@@ -67,7 +70,7 @@ def _color_icon(hex_color: str) -> QIcon:
 
 
 def _row_swatch_icon(node_color: Optional[str], group_color: Optional[str]) -> QIcon:
-    """Полоска цвета группы слева + квадрат цвета метки ноды — рисуется в
+    """Полоска цвета группы слева + квадрат цвета метки ноды - рисуется в
     пиксмапе, а не через QSS/палитру, поэтому видна независимо от темы
     (setBackground на QListWidgetItem не работает из-за стилей ::item)."""
     if not node_color and not group_color:
@@ -88,7 +91,7 @@ def _row_swatch_icon(node_color: Optional[str], group_color: Optional[str]) -> Q
 
 
 def _group_folder_icon(color: str, collapsed: bool) -> QIcon:
-    """Единая (нарисованная, а не эмодзи-символ) иконка папки-группы — тот же
+    """Единая (нарисованная, а не эмодзи-символ) иконка папки-группы - тот же
     визуальный язык, что и у цветовых меток нод, чтобы не мешать разные
     системы обозначений. Открытая/закрытая форма отличает свёрнутое
     состояние без текстовых стрелок."""
@@ -109,10 +112,10 @@ def _group_folder_icon(color: str, collapsed: bool) -> QIcon:
 
 
 _NODE_TYPE_HINTS = {
-    NodeType.DIALOGUE: "💬 Реплика персонажа — станет строкой вида: имя_переменной \"текст\"",
-    NodeType.NARRATION: "📖 Повествование от автора — строка текста без указания персонажа",
+    NodeType.DIALOGUE: "💬 Реплика персонажа - станет строкой вида: имя_переменной \"текст\"",
+    NodeType.NARRATION: "📖 Повествование от автора - строка текста без указания персонажа",
     NodeType.SHOW_BG: "🖼 Показывает фон (show bg с опциональным переходом)",
-    NodeType.SCENE: "🎬 Полная смена сцены (scene — сбрасывает все показанные спрайты)",
+    NodeType.SCENE: "🎬 Полная смена сцены (scene - сбрасывает все показанные спрайты)",
     NodeType.SHOW_SPRITE: "🧍 Показывает спрайт персонажа в заданной позиции",
     NodeType.HIDE_SPRITE: "🚫 Скрывает ранее показанный спрайт",
     NodeType.SHOW_CG: "🖼 Показывает CG-иллюстрацию",
@@ -122,18 +125,54 @@ _NODE_TYPE_HINTS = {
     NodeType.PLAY_SOUND: "🔊 Проигрывает звуковой эффект один раз",
     NodeType.PLAY_AMBIENCE: "🌬 Запускает фоновый эмбиенс-звук",
     NodeType.STOP_AMBIENCE: "🔇 Останавливает эмбиенс",
-    NodeType.LABEL: "🏷 Метка — точка, на которую можно перейти через jump",
+    NodeType.LABEL: "🏷 Метка - точка, на которую можно перейти через jump",
     NodeType.JUMP: "➡ Безусловный переход на другую метку",
     NodeType.MENU: "📋 Меню выбора для игрока",
     NodeType.PYTHON: "🐍 Произвольный Python-код ($ или python:)",
     NodeType.PAUSE: "⏸ Пауза (по времени или до клика игрока)",
     NodeType.RETURN: "⏹ Возврат из label (return)",
-    NodeType.COMMENT: "# Комментарий — не попадает в игру, только для заметок в редакторе",
+    NodeType.COMMENT: "# Комментарий - не попадает в игру, только для заметок в редакторе",
     NodeType.WINDOW: "🪟 Управление текстовым окном (window show/hide/auto)",
     NodeType.WITH_TRANSITION: "🎞 Отдельная команда перехода (with transition)",
-    NodeType.RAW: "🧩 Нераспознанный при импорте код — сохранён как есть",
+    NodeType.RAW: "🧩 Нераспознанный при импорте код - сохранён как есть",
     NodeType.CUSTOM: "🧬 Пользовательская нода по вашему шаблону (Проект → Шаблоны пользовательских нод)",
 }
+
+
+class _SpellcheckWorker(QThread):
+    """Сканирование реплик всего проекта в фоне - на больших проектах
+    (особенно если установлен pyspellchecker) синхронный обход в GUI-потоке
+    ощущался как зависание приложения без какой-либо обратной связи."""
+    progress = pyqtSignal(int, int)
+    finished_scan = pyqtSignal(list)
+
+    def __init__(self, project, parent=None, extra_whitelist=None):
+        super().__init__(parent)
+        self.project = project
+        self._cancelled = False
+        self.extra_whitelist = extra_whitelist
+
+    def cancel(self):
+        self._cancelled = True
+
+    def run(self):
+        from core.spellcheck_scanner import scan_project_spelling
+        last_emitted = -1
+
+        def on_progress(done, total):
+            nonlocal last_emitted
+                                                                       
+                                                          
+            step = max(1, total // 200) if total else 1
+            if done - last_emitted >= step or done == total:
+                last_emitted = done
+                self.progress.emit(done, total)
+
+        results = scan_project_spelling(
+            self.project, on_progress=on_progress, should_cancel=lambda: self._cancelled,
+            extra_whitelist=self.extra_whitelist,
+        )
+        self.finished_scan.emit(results)
 
 
 class SceneListPanel(QWidget):
@@ -142,6 +181,8 @@ class SceneListPanel(QWidget):
     node_selected = pyqtSignal(int, int)                        
     node_order_changed = pyqtSignal()
     before_change = pyqtSignal(str)
+    branch_back_requested = pyqtSignal()
+    present_from_here_requested = pyqtSignal(int, int)
 
     def __init__(self):
         super().__init__()
@@ -150,7 +191,28 @@ class SceneListPanel(QWidget):
         self._row_to_node = {}
         self._node_to_row = {}
         self._header_rows = {}
+                                                                           
+                                                                        
+                                                                  
+        self._branch_scene: Optional[Scene] = None
         self._setup_ui()
+
+    def is_in_branch_mode(self) -> bool:
+        return self._branch_scene is not None
+
+    def enter_branch(self, scene: Scene, label: str):
+        """Переключает панель на редактирование ветки меню как обычной сцены."""
+        self._branch_scene = scene
+        self._branch_label.setText(label)
+        self._branch_bar.setVisible(True)
+        self.scenes_group.setEnabled(False)
+        self._rebuild_nodes()
+
+    def exit_branch(self):
+        self._branch_scene = None
+        self._branch_bar.setVisible(False)
+        self.scenes_group.setEnabled(True)
+        self._rebuild_nodes()
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
@@ -159,6 +221,7 @@ class SceneListPanel(QWidget):
 
                      
         scenes_group = QGroupBox("Сцены")
+        self.scenes_group = scenes_group
         sg_layout = QVBoxLayout(scenes_group)
         sg_layout.setContentsMargins(4, 8, 4, 4)
 
@@ -189,6 +252,27 @@ class SceneListPanel(QWidget):
         sg_layout.addLayout(sc_btn_row)
 
         layout.addWidget(scenes_group)
+
+                                                
+        self._branch_bar = QFrame()
+        self._branch_bar.setStyleSheet(
+            "QFrame { background:#2d4a3a; border-radius:4px; }"
+        )
+        bb_layout = QHBoxLayout(self._branch_bar)
+        bb_layout.setContentsMargins(6, 4, 6, 4)
+        self._branch_label = QLabel("Ветка меню")
+        self._branch_label.setWordWrap(True)
+        self._branch_label.setStyleSheet("color:#6fd68f; font-size:11px; font-weight:bold;")
+        btn_branch_back = QPushButton("← Назад к сцене")
+        btn_branch_back.setStyleSheet(
+            "QPushButton { background:#1e1e1e; color:#ddd; border-radius:4px; padding:4px 8px; }"
+            "QPushButton:hover { background:#333; }"
+        )
+        btn_branch_back.clicked.connect(self.branch_back_requested.emit)
+        bb_layout.addWidget(self._branch_label, 1)
+        bb_layout.addWidget(btn_branch_back)
+        self._branch_bar.setVisible(False)
+        layout.addWidget(self._branch_bar)
 
                              
         nodes_group = QGroupBox("Элементы сцены")
@@ -294,10 +378,15 @@ class SceneListPanel(QWidget):
         return None
 
     def _style_item(self, item: QListWidgetItem, node, i: int, scene):
-        item.setText(f"  {i+1:02d}  {node.preview_text()}")
+        prefix = "⚠ " if node.import_warning else ""
+        item.setText(f"  {i+1:02d}  {prefix}{node.preview_text()}")
         grp = self._group_for_node_id(node.node_id)
         item.setIcon(_row_swatch_icon(node.color_tag, grp.color if grp else None))
-        item.setToolTip(_NODE_TYPE_HINTS.get(node.node_type, "") + "\n\n" + node.preview_text())
+        tooltip = _NODE_TYPE_HINTS.get(node.node_type, "") + "\n\n" + node.preview_text()
+        if node.import_warning:
+            tooltip += f"\n\n⚠ {node.import_warning}"
+            item.setForeground(QColor("#ffb84d"))
+        item.setToolTip(tooltip)
 
     def _current_node_index(self) -> int:
         """Индекс ноды в scene.nodes для текущей выбранной строки списка.
@@ -368,6 +457,15 @@ class SceneListPanel(QWidget):
             if row is not None:
                 self._style_item(self.node_list.item(row), scene.nodes[idx], idx, scene)
 
+    def _effective_scene_idx(self) -> int:
+        """scene_idx, передаваемый наружу через node_selected: обычный индекс
+        сцены проекта, либо -2 как признак 'мы сейчас внутри ветки меню' -
+        MainWindow в этом случае берёт сцену через _get_current_scene(), а не
+        по индексу в project.scenes."""
+        if self._branch_scene is not None:
+            return -2
+        return self.scene_list.currentRow()
+
     def _select_node_row(self, idx: int):
         """Выбирает ноду по её индексу в scene.nodes (НЕ строку списка) и
         ГАРАНТИРОВАННО уведомляет об этом, даже если currentRow уже указывает
@@ -377,8 +475,7 @@ class SceneListPanel(QWidget):
         if row < 0:
             return
         if self.node_list.currentRow() == row:
-            scene_idx = self.scene_list.currentRow()
-            self.node_selected.emit(scene_idx, idx)
+            self.node_selected.emit(self._effective_scene_idx(), idx)
         else:
             self.node_list.setCurrentRow(row)
 
@@ -386,11 +483,12 @@ class SceneListPanel(QWidget):
         """Принудительно уведомляет внешний код о текущей выбранной сцене/узле.
         Нужно вызывать после операций, где список перестраивается с заблокированными
         сигналами (Qt не уведомит сам, если индекс строки не изменился)."""
-        scene_idx = self.scene_list.currentRow()
         node_idx = self._current_node_index()
-        self.node_selected.emit(scene_idx, node_idx)
+        self.node_selected.emit(self._effective_scene_idx(), node_idx)
 
     def _get_current_scene(self) -> Optional[Scene]:
+        if self._branch_scene is not None:
+            return self._branch_scene
         if not self.project:
             return None
         idx = self.scene_list.currentRow()
@@ -407,8 +505,7 @@ class SceneListPanel(QWidget):
         idx = self._row_to_node.get(row)
         if idx is None:
             return
-        scene_idx = self.scene_list.currentRow()
-        self.node_selected.emit(scene_idx, idx)
+        self.node_selected.emit(self._effective_scene_idx(), idx)
 
                             
 
@@ -540,7 +637,7 @@ class SceneListPanel(QWidget):
 
     def duplicate_branch(self, row: int):
         """Дублирует цепочку узлов начиная с row до ближайшего label/return
-        (не включая её) или до конца сцены — то есть весь текущий 'блок
+        (не включая её) или до конца сцены - то есть весь текущий 'блок
         диалога/ветки', а не одну ноду."""
         scene = self._get_current_scene()
         if not scene or not (0 <= row < len(scene.nodes)):
@@ -698,6 +795,13 @@ class SceneListPanel(QWidget):
         if clicked_idx >= 0:
             act_dup_branch = menu.addAction("Дублировать блок диалога (до label/return/конца)")
             act_dup_branch.triggered.connect(lambda: self.duplicate_branch(clicked_idx))
+
+            if not self.is_in_branch_mode():
+                menu.addSeparator()
+                act_present_from = menu.addAction("▶ Запустить прогон отсюда")
+                act_present_from.triggered.connect(
+                    lambda: self.present_from_here_requested.emit(self.scene_list.currentRow(), clicked_idx)
+                )
 
         if len(rows) >= 2:
             menu.addSeparator()
@@ -879,6 +983,7 @@ class ScenePreviewPanel(QWidget):
 
         self.preview.sprite_moved.connect(self._on_sprite_dragged)
         self.preview.sprite_delete_requested.connect(self._on_sprite_delete_requested)
+        self.preview.zoom_step_requested.connect(self._on_preview_zoom_wheel)
         self._current_node: Optional[SceneNode] = None
         self._current_scene: Optional[Scene] = None
         self._current_node_index: int = -1
@@ -892,6 +997,12 @@ class ScenePreviewPanel(QWidget):
         self.zoom_lbl.setText(f"{value}%")
         self.preview.set_scale(value / 100)
         self.preview_scroll.setFixedHeight(self.preview.height() + 4)
+
+    def _on_preview_zoom_wheel(self, steps: int):
+        step_pct = 10 * steps
+        new_val = max(self.zoom_slider.minimum(),
+                       min(self.zoom_slider.maximum(), self.zoom_slider.value() + step_pct))
+        self.zoom_slider.setValue(new_val)
 
     def _resolve_path(self, var: str) -> Optional[str]:
         if not var or self.rm is None:
@@ -909,6 +1020,8 @@ class ScenePreviewPanel(QWidget):
             self.preview.set_background(None)
             self.preview.set_sprites([])
             self.preview.set_dialogue("", "", None)
+            self.preview.set_nvl_mode(False)
+            self.preview.set_nvl_history([])
             self._current_node = None
             self.step_lbl.setText("Нет выбранного шага сцены.")
             return
@@ -951,6 +1064,18 @@ class ScenePreviewPanel(QWidget):
             if char and getattr(char, "color", None):
                 char_color = char.color
         self.preview.set_dialogue(char_label, state.text, char_color)
+        self.preview.set_nvl_mode(state.nvl_mode)
+
+        nvl_history = []
+        if state.nvl_mode and self.project is not None:
+            try:
+                scene_idx = self.project.scenes.index(scene)
+                _, _, _, _, nvl_history = presentation_engine.fast_forward_state(
+                    self.project, presentation_engine.Position(scene_idx, node_index), rm=self.rm
+                )
+            except ValueError:
+                nvl_history = []
+        self.preview.set_nvl_history(nvl_history)
 
         self.step_lbl.setText(f"Шаг {node_index + 1} из {len(scene.nodes)}: {scene.nodes[node_index].preview_text()}")
 
@@ -964,7 +1089,7 @@ class ScenePreviewPanel(QWidget):
     def _on_sprite_delete_requested(self, tag: str):
         """Клик (без перемещения) по спрайту в превью: удаляет из сцены узел
         SHOW_SPRITE, который вывел этот тег на экран к текущему шагу. Ищем
-        с конца назад от текущего шага — это и есть узел, отвечающий за
+        с конца назад от текущего шага - это и есть узел, отвечающий за
         текущую видимость спрайта (если между ним и текущим шагом был hide
         и повторный show, найдётся именно последний show)."""
         scene = self._current_scene
@@ -1034,7 +1159,7 @@ class MainWindow(QMainWindow):
 
     def _restore_window_state(self):
         """Восстанавливает размер/положение окна из предыдущей сессии.
-        Если ничего не сохранено (первый запуск) — оставляем как есть,
+        Если ничего не сохранено (первый запуск) - оставляем как есть,
         main.py откроет окно развёрнутым."""
         self._restored_geometry = False
         geo_hex = self.app_settings.window_geometry
@@ -1123,7 +1248,7 @@ class MainWindow(QMainWindow):
                 self.pm.current_path = info.original_path
                 self._load_project_to_ui()
                 self._mark_dirty()
-                self.status_lbl.setText("Восстановлено из автосохранения — не забудьте сохранить (Ctrl+S)")
+                self.status_lbl.setText("Восстановлено из автосохранения - не забудьте сохранить (Ctrl+S)")
             except Exception as e:
                 QMessageBox.critical(self, "Ошибка восстановления", str(e))
         clear_autosave(BASE_DIR)
@@ -1190,6 +1315,8 @@ class MainWindow(QMainWindow):
         self.scene_panel.node_selected.connect(self._on_node_selected)
         self.scene_panel.node_order_changed.connect(self._on_node_changed)
         self.scene_panel.before_change.connect(self._begin_change)
+        self.scene_panel.branch_back_requested.connect(self._exit_menu_branch)
+        self.scene_panel.present_from_here_requested.connect(self._start_presentation_from)
         splitter.addWidget(self.scene_panel)
 
                                
@@ -1199,8 +1326,9 @@ class MainWindow(QMainWindow):
         self.node_editor.custom_template_store = self.custom_node_template_store
         self.node_editor.set_characters(self.pm.project.characters)
         self.node_editor.node_changed.connect(self._on_node_field_changed)
+        self.node_editor.open_menu_branch.connect(self._enter_menu_branch)
         self.node_editor.refresh_resources()
-
+        self._reload_spellcheck_whitelist()
         scroll = QScrollArea()
         scroll.setWidget(self.node_editor)
         scroll.setWidgetResizable(True)
@@ -1263,6 +1391,12 @@ class MainWindow(QMainWindow):
               
         edit_menu = mb.addMenu("Правка")
 
+        act_palette = QAction("Командная палитра...", self)
+        act_palette.setShortcut(QKeySequence("Ctrl+Shift+P"))
+        act_palette.triggered.connect(self._show_command_palette)
+        edit_menu.addAction(act_palette)
+        edit_menu.addSeparator()
+
         act_undo = QAction("Отменить", self)
         act_undo.setShortcut(QKeySequence.StandardKey.Undo)
         act_undo.setIconText("Отменить")
@@ -1323,6 +1457,14 @@ class MainWindow(QMainWindow):
         act_presentation.triggered.connect(self._start_presentation)
         proj_menu.addAction(act_presentation)
 
+        act_timing = QAction("⏱ Проверка тайминга...", self)
+        act_timing.triggered.connect(self._show_timing_report)
+        proj_menu.addAction(act_timing)
+
+        act_spellcheck = QAction("🔤 Проверка реплик...", self)
+        act_spellcheck.triggered.connect(self._show_spellcheck_report)
+        proj_menu.addAction(act_spellcheck)
+
         act_import_paths = QAction("Импорт путей из .rpy...", self)
         act_import_paths.triggered.connect(self._import_paths)
         proj_menu.addAction(act_import_paths)
@@ -1377,6 +1519,10 @@ class MainWindow(QMainWindow):
         act_export.triggered.connect(self._export_rpy)
         gen_menu.addAction(act_export)
         self.act_export = act_export
+
+        act_export_split = QAction("Экспорт в несколько файлов (по главам/актам)...", self)
+        act_export_split.triggered.connect(self._export_split)
+        gen_menu.addAction(act_export_split)
 
         act_defines = QAction("Экспорт блока defines...", self)
         act_defines.triggered.connect(self._export_defines)
@@ -1508,14 +1654,14 @@ class MainWindow(QMainWindow):
     def _update_title(self):
         title = self.pm.project.title if self.pm and self.pm.project else "Проект"
         marker = " ●" if self._dirty else ""
-        self.setWindowTitle(f"RenPy Visual Script Editor — {title}{marker}")
+        self.setWindowTitle(f"RenPy Visual Script Editor - {title}{marker}")
         if hasattr(self, "lbl_project"):
             self.lbl_project.setText(f"Проект: {title}{marker}")
 
     def _begin_change(self, label: str = "Изменение"):
         """Вызывать ПЕРЕД любой дискретной (не коалесцируемой) мутацией
         модели проекта: добавление/удаление/перемещение узла или сцены и т.п.
-        Каждый вызов — это отдельный шаг в истории отмены."""
+        Каждый вызов - это отдельный шаг в истории отмены."""
         self.undo_manager.push(project_to_dict(self.pm.project), label)
         self._edit_group_open = False
         self._update_undo_actions()
@@ -1523,7 +1669,7 @@ class MainWindow(QMainWindow):
 
     def _begin_edit_group(self, label: str = "Правка поля"):
         """Вызывать перед мутацией, которая может повторяться много раз подряд
-        не создавая новую точку истории — правка текста в поле, перетаскивание
+        не создавая новую точку истории - правка текста в поле, перетаскивание
         спрайта мышью. Снапшот берётся с момента выбора ноды/начала правки:
         все правки одной "сессии" редактирования схлопываются в один шаг
         отмены, пока не сменится выбранная нода."""
@@ -1670,7 +1816,9 @@ class MainWindow(QMainWindow):
         save_global_characters(BASE_DIR, chars)
 
     def _edit_resources(self):
-        dlg = ResourcesConfigDialog(self.rm, self.tags_store, BASE_DIR, self, usage_store=self.usage_store)
+        dlg = ResourcesConfigDialog(self.rm, self.tags_store, BASE_DIR, self,
+                                     usage_store=self.usage_store, project=self.pm.project)
+        dlg.navigate_requested.connect(self._navigate_to_usage)
         dlg.exec()
 
     def _edit_code_templates(self):
@@ -1684,10 +1832,85 @@ class MainWindow(QMainWindow):
         if self.node_editor.node is not None and self.node_editor.node.node_type == NodeType.CUSTOM:
             self.node_editor._rebuild_fields()
 
+    def _show_spellcheck_report(self):
+        if not self.pm or not self.pm.project:
+            return
+        from core.spellcheck_whitelist_store import SpellcheckWhitelist
+        whitelist_store = SpellcheckWhitelist.load(BASE_DIR)
+
+        progress = QProgressDialog("Проверка реплик...", "Отмена", 0, 0, self)
+        progress.setWindowTitle("Проверка реплик")
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setMinimumDuration(300)                                                  
+        progress.setAutoClose(False)
+        progress.setValue(0)
+
+        worker = _SpellcheckWorker(self.pm.project, self, extra_whitelist=whitelist_store.as_set())
+        self._spellcheck_worker = worker                                                       
+
+        def on_progress(done, total):
+            if total:
+                progress.setMaximum(total)
+                progress.setLabelText(f"Проверка реплик... {done}/{total}")
+            progress.setValue(done)
+
+        def on_finished(results):
+            progress.close()
+            from core.spellcheck import get_diagnostics
+            from ui.spellcheck_report_dialog import SpellcheckReportDialog
+            dlg = SpellcheckReportDialog(results, get_diagnostics(), whitelist_store, BASE_DIR, self)
+            dlg.navigate_requested.connect(self._navigate_to_usage)
+            dlg.rescan_requested.connect(self._show_spellcheck_report)
+            dlg.exec()
+            self._reload_spellcheck_whitelist()
+            self._spellcheck_worker = None
+
+        worker.progress.connect(on_progress)
+        worker.finished_scan.connect(on_finished)
+        progress.canceled.connect(worker.cancel)
+        worker.start()
+        progress.exec()
+
+    def _show_timing_report(self):
+        if not self.pm or not self.pm.project:
+            return
+        from core.timing_estimator import estimate_timing
+        from ui.timing_report_dialog import TimingReportDialog
+        stats = estimate_timing(self.pm.project)
+        dlg = TimingReportDialog(stats, self)
+        dlg.exec()
+
+    def _reload_spellcheck_whitelist(self):
+        from core.spellcheck_whitelist_store import SpellcheckWhitelist
+        from core.spellcheck_scanner import _auto_whitelist
+        store = SpellcheckWhitelist.load(BASE_DIR)
+        words = store.as_set()
+        if self.pm and self.pm.project:
+            words |= _auto_whitelist(self.pm.project)
+        self.node_editor.set_spellcheck_whitelist(words)
+
+    def _show_command_palette(self):
+        commands = collect_commands_from_menubar(self.menuBar())
+        dlg = CommandPaletteDialog(commands, self)
+        geo = self.geometry()
+        dlg.move(geo.center().x() - dlg.width() // 2, geo.top() + 90)
+        dlg.exec()
+
     def _start_presentation(self):
         if not self.pm or not self.pm.project:
             return
         self._presentation_window = PresentationWindow(self.pm.project, self.rm, self)
+        self._presentation_window.show()
+
+    def _start_presentation_from(self, scene_idx: int, node_idx: int):
+        if not self.pm or not self.pm.project:
+            return
+        from core.presentation_engine import Position
+        p = self.pm.project
+        if not (0 <= scene_idx < len(p.scenes) and 0 <= node_idx < len(p.scenes[scene_idx].nodes)):
+            return
+        pos = Position(scene_idx, node_idx)
+        self._presentation_window = PresentationWindow(p, self.rm, self, start_pos=pos)
         self._presentation_window.show()
 
     def _show_git_panel(self):
@@ -1699,7 +1922,8 @@ class MainWindow(QMainWindow):
             )
             return
         repo_dir = os.path.dirname(os.path.abspath(self.pm.current_path))
-        dlg = GitPanelDialog(repo_dir, BASE_DIR, self)
+        project_file = os.path.basename(self.pm.current_path)
+        dlg = GitPanelDialog(repo_dir, BASE_DIR, self, project_file=project_file)
         dlg.exec()
 
     def _show_screenplay_dialog(self):
@@ -1758,22 +1982,87 @@ class MainWindow(QMainWindow):
         dlg.exec()
 
     def _on_scenes_imported(self, scenes: list):
+        p = self.pm.project
+        existing_by_name = {s.name: s for s in p.scenes}
+        collisions = [s for s in scenes if s.name in existing_by_name]
+
+        mode = "add"                                      
+        if collisions:
+            names_preview = ", ".join(f"«{s.name}»" for s in collisions[:5])
+            more = f" и ещё {len(collisions) - 5}" if len(collisions) > 5 else ""
+            box = QMessageBox(self)
+            box.setWindowTitle("Повторный импорт")
+            box.setText(
+                f"{len(collisions)} импортируемых сцен уже есть в проекте по имени метки "
+                f"({names_preview}{more}).\n\nЧто сделать с совпадающими?"
+            )
+            btn_replace = box.addButton("🔄 Заменить содержимое", QMessageBox.ButtonRole.AcceptRole)
+            btn_skip = box.addButton("⏭ Пропустить совпадающие", QMessageBox.ButtonRole.YesRole)
+            btn_dupe = box.addButton("➕ Всё равно добавить как дубликаты", QMessageBox.ButtonRole.DestructiveRole)
+            box.addButton("Отмена", QMessageBox.ButtonRole.RejectRole)
+            box.exec()
+            clicked = box.clickedButton()
+            if clicked == btn_replace:
+                mode = "replace"
+            elif clicked == btn_skip:
+                mode = "skip"
+            elif clicked == btn_dupe:
+                mode = "add"
+            else:
+                return                                
+
+        added, replaced, skipped = 0, 0, 0
         for scene in scenes:
-            self.pm.project.scenes.append(scene)
+            existing = existing_by_name.get(scene.name)
+            if existing is not None and mode == "skip":
+                skipped += 1
+                continue
+            if existing is not None and mode == "replace":
+                existing.nodes = scene.nodes
+                existing.groups = scene.groups
+                replaced += 1
+                continue
+            p.scenes.append(scene)
+            added += 1
+
         self._load_project_to_ui()
-        self.status_lbl.setText(f"Импортировано сцен: {len(scenes)}")
+        parts = [f"добавлено сцен: {added}"]
+        if replaced:
+            parts.append(f"заменено: {replaced}")
+        if skipped:
+            parts.append(f"пропущено (уже есть): {skipped}")
+        self.status_lbl.setText("Импорт - " + ", ".join(parts))
 
     def _on_characters_imported(self, parsed_characters: list):
         existing_vars = {c.variable for c in self.pm.project.characters}
-        added = 0
+        existing_by_name = {c.name.strip().lower(): c for c in self.pm.project.characters if c.name}
+        added, matched_by_name, skipped_same_var = 0, 0, 0
         for pc in parsed_characters:
             if pc.variable in existing_vars:
-                continue                                                         
-            self.pm.project.characters.append(Character(name=pc.name, variable=pc.variable, color=pc.color))
+                skipped_same_var += 1                                           
+                continue
+            name_key = (pc.name or "").strip().lower()
+            existing = existing_by_name.get(name_key) if name_key else None
+            if existing is not None:
+                                                                           
+                                                                        
+                                                                          
+                matched_by_name += 1
+                continue
+            new_char = Character(name=pc.name, variable=pc.variable, color=pc.color)
+            self.pm.project.characters.append(new_char)
             existing_vars.add(pc.variable)
+            existing_by_name[name_key] = new_char
             added += 1
         if added:
             self._on_characters_changed(self.pm.project.characters)
+        if matched_by_name or skipped_same_var:
+            parts = [f"добавлено новых: {added}"]
+            if matched_by_name:
+                parts.append(f"совпало по имени (дубликаты не созданы): {matched_by_name}")
+            if skipped_same_var:
+                parts.append(f"уже было (та же переменная): {skipped_same_var}")
+            self.status_lbl.setText("Импорт персонажей - " + ", ".join(parts))
 
     def _show_resources_download(self):
         dlg = ResourcesDownloadDialog(self)
@@ -1846,6 +2135,83 @@ class MainWindow(QMainWindow):
     def _on_scene_selected(self, scene_idx: int):
         pass                                              
 
+    def _enter_menu_branch(self, node: SceneNode, choice_idx: int):
+        """Открывает ветку меню как полноценный редактируемый список нод -
+        та же панель сцен/нод, что и для обычной сцены, только источник
+        данных подменяется на choice['nodes'] (мутируется по ссылке)."""
+        choices = node.normalized_menu_choices()
+        if not (0 <= choice_idx < len(choices)):
+            return
+        text, jump, use_call, raw_body, nodes = choices[choice_idx]
+        self._branch_parent_node = node
+        self._branch_choice_idx = choice_idx
+        self._branch_return_scene_idx = getattr(self, "_current_scene_idx", -1)
+        self._branch_return_node_idx = getattr(self, "_current_node_idx", -1)
+        branch_scene = Scene(name=f"Ветка меню: {text or '(без текста)'}", nodes=nodes, groups=[])
+        label = f"✏️ Ветка меню: «{(text or '(без текста)')[:40]}»"
+        self.scene_panel.enter_branch(branch_scene, label)
+        if nodes:
+            self.scene_panel._select_node_row(0)
+        else:
+            self._current_scene_idx = -2
+            self._current_node_idx = -1
+            self.node_editor.clear_node()
+            self._refresh_preview()
+
+    def _exit_menu_branch(self):
+        node = getattr(self, "_branch_parent_node", None)
+        self.scene_panel.exit_branch()
+        self._branch_parent_node = None
+        self._branch_choice_idx = None
+        return_scene = getattr(self, "_branch_return_scene_idx", -1)
+        return_node = getattr(self, "_branch_return_node_idx", -1)
+        if 0 <= return_scene < len(self.pm.project.scenes):
+            self.scene_panel.scene_list.setCurrentRow(return_scene)
+        if node is not None:
+                                                                        
+                                                                          
+            self.node_editor.load_node(node)
+        if return_node is not None and return_node >= 0:
+            self.scene_panel._select_node_row(return_node)
+        self.scene_panel.refresh_current_node_text()
+        self._refresh_preview()
+
+    def _navigate_to_usage(self, scene_id: str, branch_path: list, node_id: str):
+        """Переход к конкретной ноде по результату 'где используется':
+        находит сцену по scene_id, при необходимости заходит во вложенные
+        ветки меню (переиспользуя _enter_menu_branch из #1) и выбирает ноду
+        по node_id."""
+        p = self.pm.project
+        scene_idx = next((i for i, s in enumerate(p.scenes) if s.scene_id == scene_id), None)
+        if scene_idx is None:
+            QMessageBox.warning(self, "Не найдено", "Сцена с этим использованием больше не существует.")
+            return
+        if self.scene_panel.is_in_branch_mode():
+            self._exit_menu_branch()
+        self.scene_panel.scene_list.setCurrentRow(scene_idx)
+
+        for menu_node_id, choice_idx in branch_path:
+            scene = self.scene_panel._get_current_scene()
+            if not scene:
+                return
+            menu_idx = next((i for i, n in enumerate(scene.nodes) if n.node_id == menu_node_id), -1)
+            if menu_idx < 0:
+                QMessageBox.warning(self, "Не найдено", "Ветка меню, ведущая к использованию, больше не найдена.")
+                return
+            self.scene_panel._select_node_row(menu_idx)
+            self._enter_menu_branch(scene.nodes[menu_idx], choice_idx)
+
+        scene = self.scene_panel._get_current_scene()
+        if not scene:
+            return
+        node_idx = next((i for i, n in enumerate(scene.nodes) if n.node_id == node_id), -1)
+        if node_idx < 0:
+            QMessageBox.warning(self, "Не найдено", "Нода с этим использованием больше не найдена.")
+            return
+        self.scene_panel._select_node_row(node_idx)
+        self.raise_()
+        self.activateWindow()
+
     def _on_node_selected(self, scene_idx: int, node_idx: int):
         p = self.pm.project
         self._current_scene_idx = scene_idx
@@ -1853,7 +2219,13 @@ class MainWindow(QMainWindow):
         self._edit_group_open = False
         self._node_load_snapshot = project_to_dict(p)
         loaded = False
-        if 0 <= scene_idx < len(p.scenes):
+        if scene_idx == -2:
+                                                                            
+            scene = self.scene_panel._get_current_scene()
+            if scene and 0 <= node_idx < len(scene.nodes):
+                self.node_editor.load_node(scene.nodes[node_idx])
+                loaded = True
+        elif 0 <= scene_idx < len(p.scenes):
             scene = p.scenes[scene_idx]
             if 0 <= node_idx < len(scene.nodes):
                 self.node_editor.load_node(scene.nodes[node_idx])
@@ -1891,13 +2263,17 @@ class MainWindow(QMainWindow):
         p = self.pm.project
         scene_idx = getattr(self, "_current_scene_idx", -1)
         node_idx = getattr(self, "_current_node_idx", -1)
-        scene = p.scenes[scene_idx] if 0 <= scene_idx < len(p.scenes) else None
+        if scene_idx == -2:
+            scene = self.scene_panel._get_current_scene()
+        else:
+            scene = p.scenes[scene_idx] if 0 <= scene_idx < len(p.scenes) else None
         self.preview_panel.show_state(scene, node_idx, p)
 
                                                        
 
     def _show_code_preview(self):
-        full = generate_full_script(self.pm.project, rm=self.rm, custom_templates=self.custom_node_template_store)
+        full = generate_full_script(self.pm.project, rm=self.rm, custom_templates=self.custom_node_template_store,
+                                     nvl_style=self.app_settings.nvl_codegen_style)
         defines = generate_defines_only(self.pm.project)
         res_defines = self.rm.generate_define_block()
         combined_defines = res_defines + "\n" + defines
@@ -1905,7 +2281,7 @@ class MainWindow(QMainWindow):
         dlg.exec()
 
     def _write_rpy_with_diff_check(self, path: str, code: str) -> Optional[str]:
-        """Записывает код в path, но если файл уже существует и отличается —
+        """Записывает код в path, но если файл уже существует и отличается -
         сначала показывает предпросмотр диффа (чтобы не потерять ручные
         правки). Возвращает итоговый путь записи или None, если пользователь
         отменил."""
@@ -1921,9 +2297,22 @@ class MainWindow(QMainWindow):
                     return None
                 if dlg.action == "copy":
                     path = dlg.copy_path
+                elif dlg.action == "merge":
+                    code = dlg.merged_text
         with open(path, 'w', encoding='utf-8') as f:
             f.write(code)
         return path
+
+    def _export_split(self):
+        if not self.pm or not self.pm.project:
+            return
+        if not self.pm.project.scenes:
+            QMessageBox.information(self, "Экспорт", "В проекте нет ни одной сцены.")
+            return
+        dlg = SplitExportDialog(self.pm.project, rm=self.rm,
+                                 custom_templates=self.custom_node_template_store, parent=self,
+                                 nvl_style=self.app_settings.nvl_codegen_style)
+        dlg.exec()
 
     def _export_rpy(self):
         path, _ = QFileDialog.getSaveFileName(
@@ -1932,7 +2321,8 @@ class MainWindow(QMainWindow):
         )
         if path:
             try:
-                code = generate_full_script(self.pm.project, rm=self.rm, custom_templates=self.custom_node_template_store)
+                code = generate_full_script(self.pm.project, rm=self.rm, custom_templates=self.custom_node_template_store,
+                                             nvl_style=self.app_settings.nvl_codegen_style)
                 written_path = self._write_rpy_with_diff_check(path, code)
                 if written_path is None:
                     self.status_lbl.setText("Экспорт отменён")

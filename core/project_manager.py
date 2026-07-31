@@ -21,13 +21,20 @@ def node_to_dict(n: SceneNode) -> dict:
         'audio_loop': n.audio_loop,
         'label_name': n.label_name, 'jump_target': n.jump_target,
         'pause_duration': n.pause_duration, 'python_code': n.python_code,
-        'menu_prompt': n.menu_prompt, 'menu_choices': n.menu_choices,
+        'menu_prompt': n.menu_prompt,
+        'menu_choices': [
+            {'text': t, 'jump': j, 'use_call': uc, 'raw_body': rb,
+             'nodes': [node_to_dict(nn) for nn in nds]}
+            for t, j, uc, rb, nds in n.normalized_menu_choices()
+        ],
         'comment_text': n.comment_text,
         'window_action': n.window_action,
         'ambience_var': n.ambience_var, 'ambience_fadein': n.ambience_fadein,
         'ambience_fadeout': n.ambience_fadeout,
         'color_tag': n.color_tag,
         'custom_template_id': n.custom_template_id, 'custom_params': n.custom_params,
+        'import_warning': n.import_warning,
+        'nvl_action': n.nvl_action,
     }
 
 
@@ -56,7 +63,23 @@ def node_from_dict(d: dict, new_id: bool = False) -> SceneNode:
     n.pause_duration = d.get('pause_duration', 0.0)
     n.python_code = d.get('python_code', '')
     n.menu_prompt = d.get('menu_prompt', '')
-    n.menu_choices = [tuple(x) for x in d.get('menu_choices', [])]
+    n.menu_choices = []
+    for c in d.get('menu_choices', []):
+        if isinstance(c, dict):
+            n.menu_choices.append({
+                'text': c.get('text', ''), 'jump': c.get('jump', ''),
+                'use_call': c.get('use_call', False), 'raw_body': c.get('raw_body', ''),
+                'nodes': [node_from_dict(nd, new_id=new_id) for nd in c.get('nodes', [])],
+            })
+        else:
+            c = list(c)
+            n.menu_choices.append({
+                'text': c[0] if len(c) > 0 else '',
+                'jump': c[1] if len(c) > 1 else '',
+                'use_call': bool(c[2]) if len(c) > 2 else False,
+                'raw_body': c[3] if len(c) > 3 else '',
+                'nodes': [],
+            })
     n.comment_text = d.get('comment_text', '')
     n.window_action = d.get('window_action', 'show')
     n.ambience_var = d.get('ambience_var')
@@ -64,6 +87,8 @@ def node_from_dict(d: dict, new_id: bool = False) -> SceneNode:
     n.ambience_fadeout = d.get('ambience_fadeout', 0.0)
     n.color_tag = d.get('color_tag')
     n.custom_template_id = d.get('custom_template_id', '')
+    n.import_warning = d.get('import_warning', '')
+    n.nvl_action = d.get('nvl_action', 'enter')
     n.custom_params = dict(d.get('custom_params', {}))
     return n
 

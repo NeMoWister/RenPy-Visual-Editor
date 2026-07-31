@@ -2,7 +2,7 @@
 Менеджер Undo/Redo для проекта.
 
 Работает на снапшотах всего проекта (через project_to_dict/project_from_dict).
-Каждый шаг снабжён текстовой меткой (что за действие) — используется
+Каждый шаг снабжён текстовой меткой (что за действие) - используется
 панелью истории (ui/history_panel_dialog.py), чтобы можно было увидеть
 список последних действий и отменить сразу до конкретного места, а не
 жать Ctrl+Z много раз подряд.
@@ -27,7 +27,7 @@ class UndoManager:
     def push(self, snapshot: dict, label: str = "Изменение"):
         """Сохраняет снапшот состояния ДО мутации. Вызывать перед изменением
         модели. Любой push сбрасывает redo-стек (стандартное поведение
-        undo/redo — новое действие "затирает" будущее)."""
+        undo/redo - новое действие "затирает" будущее)."""
         self._undo_stack.append((label, snapshot))
         if len(self._undo_stack) > self.max_depth:
             self._undo_stack.pop(0)
@@ -54,8 +54,8 @@ class UndoManager:
         return label, snap
 
     def undo_to_depth(self, current_snapshot: dict, depth: int) -> Optional[dict]:
-        """Отменяет сразу `depth` последних действий (depth=1 — как обычный
-        undo, depth=3 — как три Ctrl+Z подряд). Возвращает итоговый снапшот
+        """Отменяет сразу `depth` последних действий (depth=1 - как обычный
+        undo, depth=3 - как три Ctrl+Z подряд). Возвращает итоговый снапшот
         или None, если стек короче depth."""
         if depth < 1 or depth > len(self._undo_stack):
             return None

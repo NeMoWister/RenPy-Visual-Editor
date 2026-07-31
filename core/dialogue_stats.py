@@ -1,8 +1,8 @@
 """
-Статистика реплик по персонажам — баланс диалогов в сценарии.
+Статистика реплик по персонажам - баланс диалогов в сценарии.
 
 Считает по всем сценам проекта: сколько реплик, слов и символов приходится
-на каждого персонажа (плюс отдельно — повествование от автора, без
+на каждого персонажа (плюс отдельно - повествование от автора, без
 персонажа). Используется диалогом ui/dialogue_stats_dialog.py.
 """
 import re
@@ -48,8 +48,8 @@ def compute_dialogue_stats(project: Project) -> List[CharacterStat]:
             stats[key] = CharacterStat(key=key, display_name=display_name)
         return stats[key]
 
-    for scene in project.scenes:
-        for node in scene.nodes:
+    def walk(nodes, scene_id: str):
+        for node in nodes:
             if node.node_type == NodeType.DIALOGUE:
                 key = node.character_var or NARRATOR_KEY
                 display = by_var.get(node.character_var, node.character_var or "???") \
@@ -59,6 +59,11 @@ def compute_dialogue_stats(project: Project) -> List[CharacterStat]:
                 key = NARRATOR_KEY
                 display = NARRATOR_LABEL
                 text = node.text or ""
+            elif node.node_type == NodeType.MENU:
+                for _t, _j, _uc, _rb, choice_nodes in node.normalized_menu_choices():
+                    if choice_nodes:
+                        walk(choice_nodes, scene_id)
+                continue
             else:
                 continue
 
@@ -67,7 +72,10 @@ def compute_dialogue_stats(project: Project) -> List[CharacterStat]:
             stat.lines += 1
             stat.words += len(_WORD_RE.findall(clean))
             stat.chars += len(clean)
-            stat.scenes.add(scene.scene_id)
+            stat.scenes.add(scene_id)
+
+    for scene in project.scenes:
+        walk(scene.nodes, scene.scene_id)
 
     result = list(stats.values())
     result.sort(key=lambda s: s.lines, reverse=True)

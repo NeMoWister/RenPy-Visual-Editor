@@ -6,10 +6,13 @@ from PyQt6.QtWidgets import (
     QTextEdit, QComboBox, QPushButton, QCheckBox, QDoubleSpinBox,
     QGroupBox, QScrollArea, QFrame, QSpinBox
 )
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from core.models import SceneNode, NodeType, ANCHOR_POSITIONS, NAMED_SPRITE_POSITIONS, nearest_anchor_name
+from core.renpy_text_tags import strip_tags
+from core.spellcheck import check_text
 from ui.resource_carousel import ResourceCarousel, FolderResourceCarousel, CharacterGroupPicker, CompositeSpriteCarousel
 from ui.audio_preview import get_player as get_audio_player
+from ui.waveform_widget import WaveformWidget
 
 
 TRANSITIONS = ["", "dissolve", "fade", "fade2", "fade3", "flash", "pixellate",
@@ -26,6 +29,7 @@ NODE_TYPES = [
     ("hide_sprite",  "❌ Скрыть спрайт"),
     ("window",       "🪟 Текстовое окно (show/hide)"),
     ("with_transition", "✨ Эффект (with)"),
+    ("nvl_mode",     "📖 Режим NVL/ADV"),
     ("play_music",        "🎵 Музыка"),
     ("stop_music",        "🔇 Стоп музыка"),
     ("play_sound",        "🔊 Звук"),
@@ -78,7 +82,7 @@ def _combo(items: list) -> QComboBox:
 
 
 def _transition_combo(current_value: str = "") -> QComboBox:
-    """Комбобокс переходов, который можно редактировать вручную — нужно,
+    """Комбобокс переходов, который можно редактировать вручную - нужно,
     чтобы нестандартные переходы (свои define transform, специфичные для
     конкретной игры) не терялись при открытии узла, импортированного из
     .rpy, если их вдруг нет в списке TRANSITIONS."""
@@ -125,10 +129,10 @@ CALL_VS_JUMP_TOOLTIP = (
     "По умолчанию переход на метку делается через jump.\n\n"
     "Разница между jump и call важна, если внутри метки что-то присваивается "
     "и затем стоит return:\n"
-    "• jump — просто переходит на метку и забывает, откуда пришёл. Если в той "
+    "• jump - просто переходит на метку и забывает, откуда пришёл. Если в той "
     "метке встретится return, Ren'Py решит, что сценарий закончился, и игра "
     "выйдет в главное меню.\n"
-    "• call — переходит на метку, но запоминает место вызова. После return "
+    "• call - переходит на метку, но запоминает место вызова. После return "
     "игра вернётся обратно, на следующую строку после этого варианта меню.\n\n"
     "Включите галочку «call», если метка должна вернуть игрока сюда же после "
     "return, а не выкинуть в главное меню."
@@ -138,9 +142,16 @@ CALL_VS_JUMP_TOOLTIP = (
 class MenuChoiceRow(QFrame):
     removed = pyqtSignal()
     changed = pyqtSignal()
+    open_branch = pyqtSignal()
 
-    def __init__(self, text="", jump="", use_call=False, raw_body=""):
+    def __init__(self, text="", jump="", use_call=False, raw_body="", nodes=None):
         super().__init__()
+                                                                           
+                                                                             
+                                                                         
+                                                                           
+                                                                       
+        self.branch_nodes = nodes if nodes is not None else []
         self.setStyleSheet("QFrame { background:#252525; border-radius:4px; padding:2px; }")
         outer = QVBoxLayout(self)
         outer.setContentsMargins(4, 2, 4, 2)
@@ -180,9 +191,29 @@ class MenuChoiceRow(QFrame):
         outer.addLayout(call_row)
 
                                                                              
+        branch_row = QHBoxLayout()
+        branch_row.setContentsMargins(0, 2, 0, 0)
+        self._branch_btn = QPushButton()
+        self._branch_btn.setFlat(False)
+        self._branch_btn.setStyleSheet(
+            "QPushButton { background:#2d4a3a; color:#6fd68f; font-size:11px;"
+            " border-radius:4px; padding:4px 8px; text-align:left; }"
+            "QPushButton:hover { background:#35573f; }"
+        )
+        self._branch_btn.setToolTip(
+            "Открывает эту ветку как полноценный список нод (диалоги, показ спрайтов, "
+            "музыка, вложенное меню и т.д.) - так же, как редактируется обычная сцена. "
+            "Если ветка не пустая, она выполняется вместо jump/call и «Тела варианта»."
+        )
+        self._branch_btn.clicked.connect(self.open_branch.emit)
+        self._update_branch_btn_text()
+        branch_row.addWidget(self._branch_btn, 1)
+        outer.addLayout(branch_row)
+
+                                                                             
         body_toggle_row = QHBoxLayout()
         body_toggle_row.setContentsMargins(0, 2, 0, 0)
-        self._body_toggle_btn = QPushButton("▶ Тело варианта (inline-сценарий)")
+        self._body_toggle_btn = QPushButton("▶ Тело варианта (raw-текст, если ветка без нод)")
         self._body_toggle_btn.setFlat(True)
         self._body_toggle_btn.setStyleSheet(
             "QPushButton { color:#ff8c3d; font-size:11px; text-align:left; border:none; padding:0; }"
@@ -195,7 +226,7 @@ class MenuChoiceRow(QFrame):
 
         self.body_edit = QTextEdit()
         self.body_edit.setPlaceholderText(
-            "Код варианта — будет вставлен как есть (scene, show, диалог, jump, ...)"
+            "Код варианта - будет вставлен как есть (scene, show, диалог, jump, ...)"
         )
         self.body_edit.setPlainText(raw_body)
         self.body_edit.setMinimumHeight(90)
@@ -230,9 +261,24 @@ class MenuChoiceRow(QFrame):
     def get_raw_body(self) -> str:
         return self.body_edit.toPlainText()
 
+    def get_nodes(self) -> list:
+        return self.branch_nodes
+
+    def _update_branch_btn_text(self):
+        count = len(self.branch_nodes)
+        if count:
+            word = "нода" if count == 1 else ("ноды" if 2 <= count % 10 <= 4 and not 12 <= count % 100 <= 14 else "нод")
+            self._branch_btn.setText(f"🧩 Ветка: {count} {word} - открыть в редакторе ▸")
+        else:
+            self._branch_btn.setText("🧩 Вписать сценарий (ноды) в эту ветку ▸")
+
+    def refresh_branch_button(self):
+        self._update_branch_btn_text()
+
 
 class NodeEditor(QWidget):
     node_changed = pyqtSignal()                          
+    open_menu_branch = pyqtSignal(object, int)
 
     def __init__(self, resource_manager=None, parent=None):
         super().__init__(parent)
@@ -240,6 +286,7 @@ class NodeEditor(QWidget):
         self.tags_store = None
         self.usage_store = None
         self.custom_template_store = None
+        self._spellcheck_whitelist = None
                                                                        
                                                                       
                                                                             
@@ -261,6 +308,11 @@ class NodeEditor(QWidget):
         self.characters = characters
         if self.node:
             self._rebuild_fields()
+
+    def set_spellcheck_whitelist(self, words: set):
+        self._spellcheck_whitelist = words
+        if self.node and self._node_type_value(self.node.node_type) in ("dialogue", "narration"):
+            self._run_spellcheck_hint()
 
     def refresh_resources(self):
         asset_vars = {'bg': [], 'cg': [], 'sprites': [], 'music': [], 'sounds': [], 'ambience': []}
@@ -371,11 +423,25 @@ class NodeEditor(QWidget):
         self._rebuild_fields()
 
     def _clear_fields(self):
+        self._disconnect_waveform()
+        self._stop_audio_preview()
         self.choice_rows.clear()
         while self.fields_layout.count() > 1:
             item = self.fields_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
+
+    def _stop_audio_preview(self):
+        """Останавливает общий плеер превью при уходе с аудио-ноды (или при
+        переключении на другую аудио-ноду) - раньше трек продолжал играть
+        поверх уже другой открытой ноды, пока пользователь не жал стоп
+        вручную."""
+        try:
+            player = get_audio_player()
+            if player.is_playing():
+                player.stop()
+        except Exception:
+            pass
 
     def _rebuild_fields(self):
         self._clear_fields()
@@ -395,6 +461,8 @@ class NodeEditor(QWidget):
             self._add_window_fields()
         elif t == "with_transition":
             self._add_with_transition_fields()
+        elif t == "nvl_mode":
+            self._add_nvl_mode_fields()
         elif t in ("play_music", "play_sound", "play_ambience"):
             self._add_audio_fields(t)
         elif t in ("stop_music", "stop_ambience"):
@@ -425,8 +493,8 @@ class NodeEditor(QWidget):
             grp = QGroupBox("Персонаж")
             grp.setStyleSheet("QGroupBox { color:#888; border:1px solid #333; border-radius:4px; margin-top:8px; padding-top:8px; }")
             g = QVBoxLayout(grp)
-            self.char_combo = _combo(["— нарратор —"] + [c.name for c in self.characters])
-            self.char_combo.setToolTip("Кто говорит эту реплику. «— нарратор —» — реплика без персонажа (показывается без имени, обычно курсивом/по-другому в теме игры)")
+            self.char_combo = _combo(["- нарратор -"] + [c.name for c in self.characters])
+            self.char_combo.setToolTip("Кто говорит эту реплику. «- нарратор -» - реплика без персонажа (показывается без имени, обычно курсивом/по-другому в теме игры)")
             if n.character_var:
                 vars = [c.variable for c in self.characters]
                 if n.character_var in vars:
@@ -464,7 +532,7 @@ class NodeEditor(QWidget):
         g2.addLayout(tag_row)
 
         self.text_edit = QTextEdit()
-        self.text_edit.setToolTip("Текст реплики/повествования. Можно использовать теги Ren'Py ({i}, {b}, {color=...} и т.п.) — см. панель тегов выше.")
+        self.text_edit.setToolTip("Текст реплики/повествования. Можно использовать теги Ren'Py ({i}, {b}, {color=...} и т.п.) - см. панель тегов выше.")
         self.text_edit.setPlaceholderText("Введите текст реплики...")
         self.text_edit.setText(n.text)
         self.text_edit.setMinimumHeight(80)
@@ -477,6 +545,7 @@ class NodeEditor(QWidget):
         """)
         self.text_edit.textChanged.connect(lambda: self._apply())
         self.text_edit.textChanged.connect(self._update_length_hint)
+        self.text_edit.textChanged.connect(self._update_spellcheck_hint)
         g2.addWidget(self.text_edit)
 
         self.length_hint_lbl = QLabel()
@@ -484,6 +553,12 @@ class NodeEditor(QWidget):
         self.length_hint_lbl.setWordWrap(True)
         g2.addWidget(self.length_hint_lbl)
         self._update_length_hint()
+
+        self.spellcheck_hint_lbl = QLabel()
+        self.spellcheck_hint_lbl.setStyleSheet("font-size:11px; padding:2px 0; color:#ffb84d;")
+        self.spellcheck_hint_lbl.setWordWrap(True)
+        g2.addWidget(self.spellcheck_hint_lbl)
+        self._update_spellcheck_hint()
 
         self._insert(grp2)
 
@@ -494,7 +569,7 @@ class NodeEditor(QWidget):
 
     def _wrap_selection_with_tag(self, open_inner: str, close_name: str = None):
         """Оборачивает выделенный текст в тег Ren'Py {open_inner}...{/close_name}.
-        Если выделения нет — вставляет пустую пару тегов и ставит курсор внутрь."""
+        Если выделения нет - вставляет пустую пару тегов и ставит курсор внутрь."""
         close_name = close_name or open_inner
         cursor = self.text_edit.textCursor()
         open_tag, close_tag = "{%s}" % open_inner, "{/%s}" % close_name
@@ -509,7 +584,7 @@ class NodeEditor(QWidget):
         self.text_edit.setFocus()
 
     def _insert_whisper_tag(self):
-        """«Шёпот» — не отдельный нативный тег Ren'Py, а комбинация уменьшенного
+        """«Шёпот» - не отдельный нативный тег Ren'Py, а комбинация уменьшенного
         приглушённого курсива: {size=-4}{alpha=0.75}{i}...{/i}{/alpha}{/size}."""
         cursor = self.text_edit.textCursor()
         open_tag = "{size=-4}{alpha=0.75}{i}"
@@ -539,20 +614,55 @@ class NodeEditor(QWidget):
     def _update_length_hint(self):
         if not hasattr(self, "length_hint_lbl"):
             return
-        count = len(self.text_edit.toPlainText())
+        raw = self.text_edit.toPlainText()
+        count = len(strip_tags(raw))
+        tag_count = len(raw) - count
+        tag_note = f" (+{tag_count} симв. тегов формата, не считаются)" if tag_count else ""
         if count <= self.DIALOGUE_LEN_OK:
             color = "#7ed957"
-            msg = f"✓ {count} симв. — уместится в диалоговое окно нормально."
+            msg = f"✓ {count} симв.{tag_note} - уместится в диалоговое окно нормально."
         elif count <= self.DIALOGUE_LEN_UGLY:
             color = "#ffb84d"
-            msg = (f"⚠ {count} симв. — влезет, но может выглядеть некрасиво "
+            msg = (f"⚠ {count} симв.{tag_note} - влезет, но может выглядеть некрасиво "
                    f"(мелкий текст/много строк). Стоит сократить.")
         else:
             color = "#ff6b6b"
-            msg = (f"✕ {count} симв. — скорее всего НЕ влезет в стандартное "
+            msg = (f"✕ {count} симв.{tag_note} - скорее всего НЕ влезет в стандартное "
                    f"диалоговое окно. Разбейте реплику на несколько.")
         self.length_hint_lbl.setStyleSheet(f"font-size:11px; padding:2px 0; color:{color};")
         self.length_hint_lbl.setText(msg)
+
+    def _update_spellcheck_hint(self):
+        """Дебаунс: словарная проверка орфографии на каждое нажатие клавиши
+        при наборе длинной реплики ощущалась как лаг - теперь запускается
+        через паузу после последнего изменения, а не мгновенно."""
+        if not hasattr(self, "spellcheck_hint_lbl"):
+            return
+        if not hasattr(self, "_spellcheck_hint_timer"):
+            self._spellcheck_hint_timer = QTimer(self)
+            self._spellcheck_hint_timer.setSingleShot(True)
+            self._spellcheck_hint_timer.timeout.connect(self._run_spellcheck_hint)
+        self._spellcheck_hint_timer.start(400)
+
+    def _run_spellcheck_hint(self):
+        if not hasattr(self, "spellcheck_hint_lbl"):
+            return
+        try:
+            raw = self.text_edit.toPlainText()
+        except RuntimeError:
+                                                                           
+                                                             
+            return
+        whitelist = None
+        if self.rm is not None and getattr(self, "_spellcheck_whitelist", None) is not None:
+            whitelist = self._spellcheck_whitelist
+        issues = check_text(raw, whitelist=whitelist) if raw else []
+        if not issues:
+            self.spellcheck_hint_lbl.setText("")
+            return
+        preview = "; ".join(i.message for i in issues[:3])
+        more = f" (+{len(issues) - 3})" if len(issues) > 3 else ""
+        self.spellcheck_hint_lbl.setText(f"⚠ {preview}{more}")
 
     def _add_bg_fields(self, t: str):
         n = self.node
@@ -585,7 +695,7 @@ class NodeEditor(QWidget):
 
         g.addWidget(_label("Переход:"))
         self.trans_combo = _transition_combo(n.transition)
-        self.trans_combo.setToolTip("Анимация перехода Ren'Py (with dissolve и т.п.). Пусто — мгновенная смена без анимации.")
+        self.trans_combo.setToolTip("Анимация перехода Ren'Py (with dissolve и т.п.). Пусто - мгновенная смена без анимации.")
         self.trans_combo.currentIndexChanged.connect(lambda *_: self._apply())
         g.addWidget(self.trans_combo)
         self._insert(grp)
@@ -680,7 +790,7 @@ class NodeEditor(QWidget):
         grp.setStyleSheet("QGroupBox { color:#888; border:1px solid #333; border-radius:4px; margin-top:8px; padding-top:8px; }")
         g = QVBoxLayout(grp)
 
-        g.addWidget(_label("Скрыть персонажа целиком (клик на папку — без захода внутрь):"))
+        g.addWidget(_label("Скрыть персонажа целиком (клик на папку - без захода внутрь):"))
         self.hide_group_picker = CharacterGroupPicker(self.rm, category="sprites", thumb_size=160)
         self.hide_group_picker.set_resource_manager(self.rm, "sprites")
         if n.hide_group:
@@ -688,7 +798,7 @@ class NodeEditor(QWidget):
         self.hide_group_picker.selection_changed.connect(self._on_hide_group_selected)
         g.addWidget(self.hide_group_picker)
 
-        sep = QLabel("— или выбрать конкретный спрайт —")
+        sep = QLabel("- или выбрать конкретный спрайт -")
         sep.setAlignment(Qt.AlignmentFlag.AlignCenter)
         sep.setStyleSheet("color:#666; font-size:10px; padding:4px;")
         g.addWidget(sep)
@@ -743,7 +853,7 @@ class NodeEditor(QWidget):
         g = QVBoxLayout(grp)
 
         hint = QLabel(
-            "Самостоятельная инструкция \"with переход\" — применяет эффект ко "
+            "Самостоятельная инструкция \"with переход\" - применяет эффект ко "
             "всему экрану, не привязываясь к конкретному show/scene/hide "
             "(например, эффект тряски vpunch после реплики)."
         )
@@ -758,7 +868,43 @@ class NodeEditor(QWidget):
 
         self._insert(grp)
 
-    def _add_raw_fields(self):
+    def _add_nvl_mode_fields(self):
+        n = self.node
+        grp = QGroupBox("Режим NVL/ADV")
+        grp.setStyleSheet("QGroupBox { color:#888; border:1px solid #333; border-radius:4px; margin-top:8px; padding-top:8px; }")
+        g = QVBoxLayout(grp)
+
+        hint = QLabel(
+            "Переключает стиль показа текста: ADV - обычное окно диалога внизу "
+            "экрана (по умолчанию); NVL - во весь экран, реплики накапливаются "
+            "друг под другом, как в визуальной новелле/книге. Действует на все "
+            "реплики после этой ноды, пока не встретится нода \"Вернуться в ADV\"."
+        )
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color:#777; font-size:11px;")
+        g.addWidget(hint)
+
+        g.addWidget(_label("Действие:"))
+        self.nvl_action_combo = _combo([
+            "enter - Войти в NVL-режим",
+            "clear - Очистить экран NVL (остаться в NVL)",
+            "exit - Вернуться в ADV",
+        ])
+        current_map = {"enter": 0, "clear": 1, "exit": 2}
+        self.nvl_action_combo.setCurrentIndex(current_map.get(n.nvl_action, 0))
+        self.nvl_action_combo.currentIndexChanged.connect(lambda *_: self._apply())
+        g.addWidget(self.nvl_action_combo)
+
+        note = QLabel(
+            "В код это превращается в `nvl clear` (для «войти»/«очистить») и "
+            "переключение реплик на NVL-версию персонажа (define ..._nvl, "
+            "генерируется автоматически) либо обратно на обычную."
+        )
+        note.setWordWrap(True)
+        note.setStyleSheet("color:#666; font-size:10px;")
+        g.addWidget(note)
+
+        self._insert(grp)
         n = self.node
         grp = QGroupBox("Необработанный код (импортирован дословно)")
         grp.setStyleSheet("QGroupBox { color:#888; border:1px solid #333; border-radius:4px; margin-top:8px; padding-top:8px; }")
@@ -766,7 +912,7 @@ class NodeEditor(QWidget):
 
         hint = QLabel(
             "Этот блок не удалось распознать как одну из известных команд "
-            "редактора при импорте .rpy — он сохранён дословно и будет "
+            "редактора при импорте .rpy - он сохранён дословно и будет "
             "воспроизведён в коде в точности как есть, без изменений."
         )
         hint.setWordWrap(True)
@@ -885,6 +1031,7 @@ class NodeEditor(QWidget):
         self.audio_combo = _combo(vars_list)
         if n.audio_var in vars_list:
             self.audio_combo.setCurrentText(n.audio_var)
+        self.audio_combo.currentTextChanged.connect(self._on_audio_file_changed)
         combo_row.addWidget(self.audio_combo, 1)
 
         btn_play = QPushButton("▶️")
@@ -913,40 +1060,142 @@ class NodeEditor(QWidget):
             g.addWidget(self.loop_check)
 
         if t in ("play_music", "play_ambience"):
-            fadein_attr = "fadein_spin"
-            fadeout_attr = "ambience_fadeout_spin" if t == "play_ambience" else None
             value_fadein = n.music_fadein if t == "play_music" else n.ambience_fadein
+            value_fadeout = n.music_fadeout if t == "play_music" else n.ambience_fadeout
 
-            fadein_row = QHBoxLayout()
-            fadein_row.addWidget(_label("Fade in (сек):"))
+            fade_row = QHBoxLayout()
+            fade_row.addWidget(_label("Fade in (сек):"))
             self.fadein_spin = QDoubleSpinBox()
             self.fadein_spin.setRange(0.0, 60.0)
             self.fadein_spin.setSingleStep(0.5)
             self.fadein_spin.setDecimals(1)
             self.fadein_spin.setValue(value_fadein)
             self.fadein_spin.setToolTip("Плавное нарастание громкости в начале (fadein N)")
-            self.fadein_spin.valueChanged.connect(lambda *_: self._apply())
-            fadein_row.addWidget(self.fadein_spin)
-            fadein_row.addStretch()
-            g.addLayout(fadein_row)
+            self.fadein_spin.valueChanged.connect(self._on_fadein_spin_changed)
+            fade_row.addWidget(self.fadein_spin)
 
-        if t == "play_ambience":
-            fadeout_row = QHBoxLayout()
-            fadeout_row.addWidget(_label("Fade out (сек):"))
-            self.ambience_fadeout_spin = QDoubleSpinBox()
-            self.ambience_fadeout_spin.setRange(0.0, 60.0)
-            self.ambience_fadeout_spin.setSingleStep(0.5)
-            self.ambience_fadeout_spin.setDecimals(1)
-            self.ambience_fadeout_spin.setValue(n.ambience_fadeout)
-            self.ambience_fadeout_spin.valueChanged.connect(lambda *_: self._apply())
-            fadeout_row.addWidget(self.ambience_fadeout_spin)
-            fadeout_row.addStretch()
-            g.addLayout(fadeout_row)
+            fade_row.addSpacing(12)
+            fade_row.addWidget(_label("Fade out (сек):"))
+            self.fadeout_spin = QDoubleSpinBox()
+            self.fadeout_spin.setRange(0.0, 60.0)
+            self.fadeout_spin.setSingleStep(0.5)
+            self.fadeout_spin.setDecimals(1)
+            self.fadeout_spin.setValue(value_fadeout)
+            self.fadeout_spin.setToolTip(
+                "Плавное затухание в конце трека (для музыки - если она доиграет "
+                "до конца сама, не оборвётся раньше через stop music)"
+            )
+            self.fadeout_spin.valueChanged.connect(self._on_fadeout_spin_changed)
+            fade_row.addWidget(self.fadeout_spin)
+            fade_row.addStretch()
+            g.addLayout(fade_row)
+                                                                             
+                                                                                
+            self.ambience_fadeout_spin = self.fadeout_spin
+
+        g.addWidget(_label("Волна (клик - перемотка, перетаскивание маркеров - fadein/fadeout):"))
+        self.waveform = WaveformWidget()
+        g.addWidget(self.waveform)
+        self._wire_waveform(t, n)
 
         self._insert(grp)
 
+    def _on_audio_file_changed(self, var_name: str):
+        self._apply()
+        entry = self.rm.find_by_var(var_name) if (self.rm and var_name) else None
+        if hasattr(self, "waveform"):
+            self.waveform.set_audio(entry.abs_path if entry else "")
+
+    def _wire_waveform(self, t: str, n):
+        """Подключает волну к общему плееру превью и к спинбоксам fade (если
+        они есть у этого типа ноды - у play_sound фейдов нет вообще).
+
+        ВАЖНО: плеер (get_audio_player().player) - общий синглтон на всё
+        приложение, а self.waveform каждый раз создаётся заново при
+        переключении между нодами. Раньше здесь просто копились новые
+        connect() без disconnect() старых - если музыка продолжала играть
+        при переключении ноды, positionChanged/playbackStateChanged
+        продолжали дёргать МЕТОД УЖЕ УДАЛЯЕМОГО (deleteLater) виджета волны
+        предыдущей ноды, что и роняло приложение. Теперь перед подключением
+        новых сигналов явно отключаем всё, что было подключено предыдущим
+        вызовом (см. _disconnect_waveform)."""
+        self._disconnect_waveform()
+        player = get_audio_player().player
+        conns = [
+            player.positionChanged.connect(self.waveform.set_position_ms),
+            player.durationChanged.connect(self.waveform.set_duration_ms),
+            player.playbackStateChanged.connect(
+                lambda state: self.waveform.set_playing(state == player.PlaybackState.PlayingState)
+            ),
+            self.waveform.seek_requested.connect(self._on_waveform_seek),
+        ]
+        if hasattr(self, "fadein_spin"):
+            conns.append(self.waveform.fadein_changed.connect(self._on_waveform_fadein_dragged))
+        if hasattr(self, "fadeout_spin"):
+            conns.append(self.waveform.fadeout_changed.connect(self._on_waveform_fadeout_dragged))
+        self._waveform_conns = conns
+        self._waveform_player = player
+
+        fadein_sec = self.fadein_spin.value() if hasattr(self, "fadein_spin") else 0.0
+        fadeout_sec = self.fadeout_spin.value() if hasattr(self, "fadeout_spin") else 0.0
+        self.waveform.set_fades(fadein_sec, fadeout_sec)
+
+                                                                                
+                                                                       
+        current_var = self.audio_combo.currentText() if hasattr(self, "audio_combo") else (n.audio_var or "")
+        entry = self.rm.find_by_var(current_var) if (self.rm and current_var) else None
+        if entry:
+            self.waveform.set_audio(entry.abs_path)
+
+    def _disconnect_waveform(self):
+        """Отключает сигналы общего плеера от волны предыдущей аудио-ноды
+        (если была) - вызывается и перед подключением новой волны, и при
+        полной очистке полей редактора (переход на неаудио-ноду)."""
+        player = getattr(self, "_waveform_player", None)
+        conns = getattr(self, "_waveform_conns", None)
+        if player is not None and conns:
+            for c in conns:
+                try:
+                    player.disconnect(c)
+                except (TypeError, RuntimeError):
+                                                                        
+                    pass
+        self._waveform_conns = []
+        self._waveform_player = None
+
+    def _on_fadein_spin_changed(self, *_):
+        self.waveform.set_fades(self.fadein_spin.value(),
+                                 self.fadeout_spin.value() if hasattr(self, "fadeout_spin") else 0.0)
+        self._apply()
+
+    def _on_fadeout_spin_changed(self, *_):
+        self.waveform.set_fades(self.fadein_spin.value() if hasattr(self, "fadein_spin") else 0.0,
+                                 self.fadeout_spin.value())
+        self._apply()
+
+    def _on_waveform_fadein_dragged(self, seconds: float):
+        if hasattr(self, "fadein_spin"):
+            self.fadein_spin.blockSignals(True)
+            self.fadein_spin.setValue(round(seconds, 1))
+            self.fadein_spin.blockSignals(False)
+            self._apply()
+
+    def _on_waveform_fadeout_dragged(self, seconds: float):
+        if hasattr(self, "fadeout_spin"):
+            self.fadeout_spin.blockSignals(True)
+            self.fadeout_spin.setValue(round(seconds, 1))
+            self.fadeout_spin.blockSignals(False)
+            self._apply()
+
+    def _on_waveform_seek(self, seconds: float):
+        player = get_audio_player().player
+        if player.duration() > 0:
+            player.setPosition(int(seconds * 1000))
+            if player.playbackState() != player.PlaybackState.PlayingState:
+                player.play()
+
     def _add_stop_audio_fields(self, t: str):
-        """stop_music / stop_ambience — только канал и опциональный fadeout."""
+        """stop_music / stop_ambience - только канал и опциональный fadeout."""
         n = self.node
         title = "Стоп музыка" if t == "stop_music" else "Стоп эмбиенс"
         grp = QGroupBox(title)
@@ -997,7 +1246,7 @@ class NodeEditor(QWidget):
         g = QVBoxLayout(grp)
         g.addWidget(_label("Цель перехода:"))
         self.jump_edit = _field("имя метки")
-        self.jump_edit.setToolTip("Имя label, на которую нужно перейти (jump). Должна существовать где-то в сценарии — иначе Ren'Py выдаст ошибку при запуске игры.")
+        self.jump_edit.setToolTip("Имя label, на которую нужно перейти (jump). Должна существовать где-то в сценарии - иначе Ren'Py выдаст ошибку при запуске игры.")
         self.jump_edit.setText(n.jump_target)
         g.addWidget(self.jump_edit)
         self._insert(grp)
@@ -1018,8 +1267,8 @@ class NodeEditor(QWidget):
         self.choices_layout = QVBoxLayout(self.choices_container)
         self.choices_layout.setContentsMargins(0, 0, 0, 0)
         self.choices_layout.setSpacing(4)
-        for text, jump, use_call, raw_body in n.normalized_menu_choices():
-            self._add_choice_row(text, jump, use_call, raw_body)
+        for text, jump, use_call, raw_body, nodes in n.normalized_menu_choices():
+            self._add_choice_row(text, jump, use_call, raw_body, nodes)
         g.addWidget(self.choices_container)
 
         add_btn = QPushButton("+ Добавить вариант")
@@ -1028,7 +1277,7 @@ class NodeEditor(QWidget):
         g.addWidget(add_btn)
 
         info = QLabel(
-            "По умолчанию переход на метку — jump. Включайте «call» у варианта, "
+            "По умолчанию переход на метку - jump. Включайте «call» у варианта, "
             "если после return в этой метке игрок должен вернуться обратно в меню, "
             "а не вылететь в главное меню (так ведёт себя jump + return)."
         )
@@ -1038,13 +1287,20 @@ class NodeEditor(QWidget):
 
         self._insert(grp)
 
-    def _add_choice_row(self, text="", jump="", use_call=False, raw_body=""):
-        row = MenuChoiceRow(text, jump, use_call, raw_body)
+    def _add_choice_row(self, text="", jump="", use_call=False, raw_body="", nodes=None):
+        row = MenuChoiceRow(text, jump, use_call, raw_body, nodes if nodes is not None else [])
         self.choice_rows.append(row)
         row.removed.connect(lambda: self._remove_choice(row))
         row.changed.connect(lambda *_: self._apply())
+        row.open_branch.connect(lambda r=row: self._on_open_branch(r))
         self.choices_layout.addWidget(row)
         self._apply()
+
+    def _on_open_branch(self, row: "MenuChoiceRow"):
+        if self.node is None or row not in self.choice_rows:
+            return
+        idx = self.choice_rows.index(row)
+        self.open_menu_branch.emit(self.node, idx)
 
     def _remove_choice(self, row: MenuChoiceRow):
         self.choice_rows.remove(row)
@@ -1074,9 +1330,9 @@ class NodeEditor(QWidget):
         grp = QGroupBox("Пауза")
         grp.setStyleSheet("QGroupBox { color:#888; border:1px solid #333; border-radius:4px; margin-top:8px; padding-top:8px; }")
         g = QVBoxLayout(grp)
-        g.addWidget(_label("Длительность в секундах (0 — ждать клика игрока):"))
+        g.addWidget(_label("Длительность в секундах (0 - ждать клика игрока):"))
         self.pause_spin = QDoubleSpinBox()
-        self.pause_spin.setToolTip("Длительность паузы в секундах. 0 — пауза до клика игрока (эквивалент голой команды pause).")
+        self.pause_spin.setToolTip("Длительность паузы в секундах. 0 - пауза до клика игрока (эквивалент голой команды pause).")
         self.pause_spin.setRange(0.0, 600.0)
         self.pause_spin.setSingleStep(0.5)
         self.pause_spin.setDecimals(1)
@@ -1084,8 +1340,8 @@ class NodeEditor(QWidget):
         self.pause_spin.setStyleSheet("QDoubleSpinBox { background:#2a2a2a; color:#fff; border:1px solid #444; border-radius:4px; padding:4px; }")
         self.pause_spin.valueChanged.connect(lambda *_: self._apply())
         g.addWidget(self.pause_spin)
-        hint = QLabel("0 секунд — pause без числа: сцена ждёт клика игрока, "
-                       "как обычная реплика без текста. Больше 0 — pause N: "
+        hint = QLabel("0 секунд - pause без числа: сцена ждёт клика игрока, "
+                       "как обычная реплика без текста. Больше 0 - pause N: "
                        "ждёт указанное время и продолжает само.")
         hint.setWordWrap(True)
         hint.setStyleSheet("color:#666; font-size:10px; padding-top:2px;")
@@ -1098,10 +1354,10 @@ class NodeEditor(QWidget):
         g = QVBoxLayout(grp)
         hint = QLabel(
             "Эта нода просто вставляет return в сценарий, без параметров.\n\n"
-            "Если до этого места дошли через jump — Ren'Py решит, что сценарий "
+            "Если до этого места дошли через jump - Ren'Py решит, что сценарий "
             "закончился, и игра выйдет в главное меню.\n"
             "Если дошли через call (например, из варианта меню с галочкой "
-            "«call») — игра вернётся обратно сразу после места вызова."
+            "«call») - игра вернётся обратно сразу после места вызова."
         )
         hint.setWordWrap(True)
         hint.setStyleSheet("color:#999; font-size:11px; padding:4px;")
@@ -1157,9 +1413,10 @@ class NodeEditor(QWidget):
             if t == "play_music":
                 self.node.audio_loop = self.loop_check.isChecked()
                 self.node.music_fadein = self.fadein_spin.value()
+                self.node.music_fadeout = self.fadeout_spin.value()
             elif t == "play_ambience":
                 self.node.ambience_fadein = self.fadein_spin.value()
-                self.node.ambience_fadeout = self.ambience_fadeout_spin.value()
+                self.node.ambience_fadeout = self.fadeout_spin.value()
         elif t in ("stop_music", "stop_ambience"):
             if t == "stop_music":
                 self.node.music_fadeout = self.stop_fadeout_spin.value()
@@ -1170,6 +1427,9 @@ class NodeEditor(QWidget):
             self.node.transition = self.window_trans_combo.currentText()
         elif t == "with_transition":
             self.node.transition = self.with_trans_combo.currentText()
+        elif t == "nvl_mode":
+            action = self.nvl_action_combo.currentText().split(" - ")[0].strip()
+            self.node.nvl_action = action
         elif t == "label":
             self.node.label_name = self.label_edit.text().strip()
         elif t == "jump":
@@ -1177,7 +1437,11 @@ class NodeEditor(QWidget):
         elif t == "menu":
             self.node.menu_question = self.menu_q.text()
             self.node.menu_choices = [
-                (r.text_edit.text(), r.jump_edit.text(), r.get_use_call(), r.get_raw_body())
+                {
+                    "text": r.text_edit.text(), "jump": r.jump_edit.text(),
+                    "use_call": r.get_use_call(), "raw_body": r.get_raw_body(),
+                    "nodes": r.get_nodes(),
+                }
                 for r in self.choice_rows
             ]
         elif t == "pause":

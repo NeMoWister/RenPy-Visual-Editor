@@ -13,7 +13,7 @@
     im.Composite((900,1080), (0,0), "sprites/normal/un/un_1_body.png", (0,0), "sprites/normal/un/un_1_pioneer.png", (0,0), "sprites/normal/un/un_1_shy.png"), im.matrix.tint(0.63, 0.78, 0.82) )
 
 Условная логика (persistent.sprite_time, im.matrix.tint) для предпросмотра и
-редактора игнорируется — нас интересует только финальный набор слоёв-картинок:
+редактора игнорируется - нас интересует только финальный набор слоёв-картинок:
 берём ПОСЛЕДНИЙ найденный im.Composite(...) в блоке (для ConditionSwitch это
 безусловная ветка True, идущая последней по соглашению; для одиночного
 im.MatrixColor это единственный Composite).
@@ -105,9 +105,9 @@ def _strip_sprites_prefix(path: str) -> str:
 def parse_sprites_rpy(text: str, source: str = "custom") -> List[CompositeSprite]:
     """Разбирает содержимое sprites.rpy и возвращает список составных
     спрайтов. Пропускает (не вызывает исключение) блоки, которые не удалось
-    распознать — чтобы один неожиданный фрагмент не ронял парсинг всего файла.
+    распознать - чтобы один неожиданный фрагмент не ронял парсинг всего файла.
     source помечает, из какой корневой папки ресурсов (default/custom) этот
-    sprites.rpy был прочитан — нужно, чтобы resolve_layer_path знал, где
+    sprites.rpy был прочитан - нужно, чтобы resolve_layer_path знал, где
     искать сами файлы слоёв."""
     results: List[CompositeSprite] = []
     headers = list(_HEADER_RE.finditer(text))

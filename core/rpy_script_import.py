@@ -1,23 +1,23 @@
                        
 """
-Импорт .rpy-сценария обратно в набор SceneNode — обратная операция к
+Импорт .rpy-сценария обратно в набор SceneNode - обратная операция к
 code_generator.py.
 
 Поддерживаемые конструкции:
   label name:
   scene bg_var [at позиция] [with переход]   (в т.ч. с переходом на ОТДЕЛЬНОЙ
                                                 следующей строке)
-  show var [at позиция] [with переход]       — фон/CG/спрайт; позиция —
+  show var [at позиция] [with переход]       - фон/CG/спрайт; позиция -
       именованная (left/cleft/center/cright/right/fleft/fright/centre) или
       ATL-блок xalign/yalign/zoom
   hide tag [with переход]
   window show|hide [with переход]
-  with переход                                — самостоятельный эффект на
+  with переход                                - самостоятельный эффект на
                                                  весь экран (не привязан к
                                                  show/scene/hide)
   play music/sound/ambience var [fadein N] [fadeout N] [loop]
   stop music/ambience [fadeout N]
-  Var "текст" / "текст"                       — диалог / нарратор
+  Var "текст" / "текст"                       - диалог / нарратор
   menu: / "вариант": / jump / call
   pause [N] / pause(N) / $ renpy.pause(N)
   return
@@ -35,10 +35,10 @@ code_generator.py.
     with dissolve
 Парсер копит такие узлы в очередь ("ожидающие перехода") и применяет
 переход к ним всем, когда встречает одиночную строку "with X". Если
-очередь пуста — это самостоятельная инструкция with (WITH_TRANSITION).
+очередь пуста - это самостоятельная инструкция with (WITH_TRANSITION).
 
 Всё непознанное (условия if/elif, кастомные ATL-анимации с linear/ease и
-т.п., произвольные вызовы) складывается в RAW-узел ДОСЛОВНО — текст
+т.п., произвольные вызовы) складывается в RAW-узел ДОСЛОВНО - текст
 сохраняется с относительным отступом внутри себя, на экспорте просто
 переносится обратно как есть, без оборачивания в "$ "/"python:".
 """
@@ -55,7 +55,7 @@ from core.models import (
 
 def _strip_trailing_comment(line: str) -> str:
     """Убирает строчный комментарий вне кавычек (комментарий ВНУТРИ строки,
-    после какого-то кода — не строки, целиком состоящие из комментария,
+    после какого-то кода - не строки, целиком состоящие из комментария,
     те обрабатываются отдельно, см. _tokenize)."""
     in_q = False
     for i, ch in enumerate(line):
@@ -90,7 +90,7 @@ _PENDING_TRANSITION_TYPES = {
 
 
 def _parse_with(tail: str) -> Tuple[str, str]:
-    """Возвращает (tail_без_with, transition_name) — для INLINE 'with X' на
+    """Возвращает (tail_без_with, transition_name) - для INLINE 'with X' на
     той же строке, что и сама команда."""
     m = _TRANSITION_RE.search(tail)
     if m:
@@ -99,9 +99,9 @@ def _parse_with(tail: str) -> Tuple[str, str]:
 
 
 def _parse_at(tail: str) -> Tuple[str, Optional[SpritePosition]]:
-    """Возвращает (tail_без_at, SpritePosition|None) — для INLINE 'at имя'.
+    """Возвращает (tail_без_at, SpritePosition|None) - для INLINE 'at имя'.
     Распознаёт только однословные имена позиций (left/cleft/center/...).
-    Если 'at' есть, но имя не из известного набора — позиция всё равно
+    Если 'at' есть, но имя не из известного набора - позиция всё равно
     считается заданной (центр по умолчанию), а кусок 'at X' убирается из
     хвоста, чтобы не испортить имя переменной спрайта."""
     m = _AT_RE.search(tail)
@@ -144,7 +144,7 @@ def _tokenize(text: str) -> List[LineToken]:
 
 def _dedent_block(tokens: List[LineToken], start: int, end: int, base_indent: int) -> List[str]:
     """Возвращает исходные строки tokens[start:end] с вычтенным base_indent
-    символов отступа (если он есть у строки) — относительная вложенность
+    символов отступа (если он есть у строки) - относительная вложенность
     внутри блока сохраняется, поэтому при повторном добавлении текущего
     pad на экспорте получается корректный результат без накопления
     лишних отступов."""
@@ -165,6 +165,10 @@ def _dedent_block(tokens: List[LineToken], start: int, end: int, base_indent: in
 class ScriptImportReport:
     scenes: List[Scene] = field(default_factory=list)
     unrecognized: List[Tuple[int, str]] = field(default_factory=list)                  
+                                                                      
+                                                                           
+                                                            
+    needs_resource: List[Tuple[int, str, str]] = field(default_factory=list)
     total_nodes: int = 0
     total_lines: int = 0
 
@@ -185,7 +189,7 @@ class ScriptImportReport:
 
 class RpyScriptParser:
     def __init__(self, rm=None):
-        """rm — ResourceManager (необязательно): нужен для различения
+        """rm - ResourceManager (необязательно): нужен для различения
         фонов/CG/спрайтов по var_name (иначе show foo → bg_var = foo)."""
         self.rm = rm
         self._bg_vars: set = set()
@@ -245,6 +249,12 @@ class RpyScriptParser:
             else:
                 self._current_scene.name = lname
             self._add(SceneNode(node_type=NodeType.LABEL, label_name=lname))
+            return i + 1
+
+                                                                         
+        if s == 'nvl clear':
+            self._flush_pending()
+            self._add(SceneNode(node_type=NodeType.NVL_MODE, nvl_action='clear'))
             return i + 1
 
                                                                          
@@ -339,10 +349,14 @@ class RpyScriptParser:
         if m:
             code = m.group(1).rstrip()
             pm = re.match(r'^renpy\.pause\(\s*([\d.]+)?\s*\)\s*$', code)
+            nvl_m = re.match(r'^set_mode_(nvl|adv)\(\s*\)\s*$', code)
             self._flush_pending()
             if pm:
                 dur = float(pm.group(1)) if pm.group(1) else 0.0
                 self._add(SceneNode(node_type=NodeType.PAUSE, pause_duration=dur))
+            elif nvl_m:
+                action = 'enter' if nvl_m.group(1) == 'nvl' else 'exit'
+                self._add(SceneNode(node_type=NodeType.NVL_MODE, nvl_action=action))
             else:
                 self._add(SceneNode(node_type=NodeType.PYTHON, python_code=code))
             return i + 1
@@ -405,7 +419,7 @@ class RpyScriptParser:
         self._pending.clear()
 
     def _block_end(self, i: int, base_indent: int) -> int:
-        """Индекс первого токена с indent <= base_indent, начиная с i —
+        """Индекс первого токена с indent <= base_indent, начиная с i -
         конец тела блока, начавшегося на отступе base_indent."""
         tokens = self._tokens
         while i < len(tokens) and tokens[i].indent > base_indent:
@@ -469,6 +483,7 @@ class RpyScriptParser:
                     pos.zoom = val
 
         node_type = forced_type
+        unresolved_var = False
         if node_type is None:
             if var in self._bg_vars:
                 node_type = NodeType.SHOW_BG
@@ -490,6 +505,14 @@ class RpyScriptParser:
                 if has_matching_sprite or (pos is not None and not has_colon):
                                                                          
                     node_type = NodeType.SHOW_SPRITE
+                elif not has_colon:
+                                                                               
+                                                                             
+                                                                              
+                                                                              
+                                                                        
+                    node_type = NodeType.SHOW_SPRITE
+                    unresolved_var = True
                 else:
                                                                        
                                                                        
@@ -509,6 +532,12 @@ class RpyScriptParser:
                 node_type=NodeType.SHOW_SPRITE, sprite_var=var, transition=trans,
                 sprite_position=pos or SpritePosition(0.5, 1.0),
             )
+        if unresolved_var:
+            node.import_warning = (
+                f"Ресурс «{var}» не найден в менеджере ресурсов - добавьте файл "
+                f"и пересканируйте ресурсы, либо поправьте ссылку вручную."
+            )
+            self._report.needs_resource.append((tok.lineno, tok.stripped, var))
 
         self._add(node)
         if not trailing_with_consumed and not trans:
@@ -540,26 +569,35 @@ class RpyScriptParser:
             if m:
                 choice_text = m.group(1).replace('\\"', '"')
                 choice_indent = tok.indent
-                jump_target = ""
-                use_call = False
 
                 body_start = i + 1
                 i += 1
                 while i < len(tokens) and tokens[i].indent > choice_indent:
-                    bs = tokens[i].stripped
-                    jm = re.match(r'^(jump|call)\s+(\w+)', bs)
-                    if jm:
-                        use_call = jm.group(1) == 'call'
-                        jump_target = jm.group(2)
                     i += 1
                 body_end = i
 
+                stripped_body = [t for t in tokens[body_start:body_end] if t.stripped]
+
+                jump_target = ""
+                use_call = False
+                branch_nodes: List[SceneNode] = []
+
+                if len(stripped_body) == 1:
+                    jm = re.match(r'^(jump|call)\s+(\w+)\s*$', stripped_body[0].stripped)
+                    if jm:
+                        use_call = jm.group(1) == 'call'
+                        jump_target = jm.group(2)
+
+                if not jump_target and stripped_body:
                                                                                
-                                                                          
-                                                                    
-                body_lines = _dedent_block(tokens, body_start, body_end, choice_indent + 4)
-                raw_body = "\n".join(body_lines)
-                choices.append((choice_text, jump_target, use_call, raw_body))
+                                                                            
+                                                                     
+                    branch_nodes = self._parse_choice_body(body_start, body_end)
+
+                choices.append({
+                    "text": choice_text, "jump": jump_target, "use_call": use_call,
+                    "raw_body": "", "nodes": branch_nodes,
+                })
                 continue
 
             i += 1
@@ -567,6 +605,26 @@ class RpyScriptParser:
         node.menu_choices = choices
         self._add(node)
         return i
+
+    def _parse_choice_body(self, start: int, end: int) -> List[SceneNode]:
+        """Парсит диапазон токенов [start, end) - тело варианта меню - тем же
+        построчным диспетчером (_parse_one), что и основной сценарий, отдавая
+        настоящий список нод вместо сырого текста. Временно подменяет
+        "текущую сцену" на изолированный контейнер и восстанавливает её
+        после разбора, даже если внутри тела попался неожиданный label."""
+        branch_scene = Scene(name="__menu_branch__", nodes=[])
+        prev_scene = self._current_scene
+        prev_pending = self._pending
+        self._current_scene = branch_scene
+        self._pending = []
+        try:
+            i = start
+            while i < end:
+                i = self._parse_one(i)
+        finally:
+            self._current_scene = prev_scene
+            self._pending = prev_pending
+        return branch_scene.nodes
 
     def _try_parse_dialogue(self, s: str) -> Optional[SceneNode]:
         if len(s) >= 2 and s[0] == s[-1] and s[0] in ('"', "'"):

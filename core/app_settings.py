@@ -2,7 +2,7 @@
 """
 Общие настройки приложения, не привязанные к конкретному проекту сценария.
 Хранятся в секции "app_settings" общего файла editor_config.json (см.
-core/unified_config.py) — в базовой папке приложения (рядом с .exe или
+core/unified_config.py) - в базовой папке приложения (рядом с .exe или
 main.py, см. core/paths.py).
 """
 from dataclasses import dataclass, asdict
@@ -28,6 +28,13 @@ class AppSettings:
     window_state: str = ""
     autosave_enabled: bool = True
     autosave_interval_sec: int = 180
+                                                                         
+                                                                   
+                                                                      
+                                                                    
+                                                                     
+                                  
+    nvl_codegen_style: str = "character"
 
     @classmethod
     def load(cls, base_dir: str) -> "AppSettings":

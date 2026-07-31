@@ -188,7 +188,7 @@ class CharactersDialog(QDialog):
             self, "Как объединить?",
             "Добавить импортированных персонажей к текущим "
             "(совпадающие по переменной будут перезаписаны)?\n\n"
-            "Да — добавить/обновить.\nНет — полностью заменить текущий список.",
+            "Да - добавить/обновить.\nНет - полностью заменить текущий список.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel
         )
         if reply == QMessageBox.StandardButton.Cancel:

@@ -1,7 +1,7 @@
                        
 """
 Вычисление визуального состояния сцены (фон, CG, активные спрайты,
-текущая реплика) на момент конкретного узла — используется для
+текущая реплика) на момент конкретного узла - используется для
 предпросмотра сцены.
 """
 from dataclasses import dataclass, field
@@ -20,8 +20,8 @@ class ActiveSprite:
     composite: Optional[CompositeSprite] = None                                                       
 
     def top_group(self) -> str:
-        """Имя персонажа: для составного спрайта — CompositeSprite.character,
-        для обычного папочного — первый сегмент group_path."""
+        """Имя персонажа: для составного спрайта - CompositeSprite.character,
+        для обычного папочного - первый сегмент group_path."""
         if self.composite is not None:
             return self.composite.character
         return self.group_path.split('/')[0] if self.group_path else ""
@@ -34,6 +34,7 @@ class SceneState:
     sprites: Dict[str, ActiveSprite] = field(default_factory=dict)
     char_var: Optional[str] = None
     text: str = ""
+    nvl_mode: bool = False
 
     def sprite_list(self) -> List[ActiveSprite]:
         return list(self.sprites.values())
@@ -45,10 +46,10 @@ def compute_state_up_to(scene: Scene, node_index: int, rm=None) -> SceneState:
     возвращает итоговое визуальное состояние: какой фон/CG показан,
     какие спрайты на экране и где, какая реплика говорится сейчас.
 
-    rm (ResourceManager, опционально) — если передан, для каждого активного
+    rm (ResourceManager, опционально) - если передан, для каждого активного
     спрайта разрешается его group_path (папка персонажа/вариации) для обычных
     спрайтов, либо CompositeSprite (персонаж/позиция/слои) для составных из
-    sprites.rpy — нужно, чтобы можно было "скрыть любого спрайта персонажа X"
+    sprites.rpy - нужно, чтобы можно было "скрыть любого спрайта персонажа X"
     без знания точного тега/вариации.
     """
     state = SceneState()
@@ -64,7 +65,7 @@ def compute_state_up_to(scene: Scene, node_index: int, rm=None) -> SceneState:
 
 def _resolve_sprite_tag(node: SceneNode, rm) -> tuple:
     """Возвращает (tag, composite_or_none) для узла SHOW_SPRITE/HIDE_SPRITE.
-    Если sprite_var совпадает с составным спрайтом (sprites.rpy) — тег по
+    Если sprite_var совпадает с составным спрайтом (sprites.rpy) - тег по
     умолчанию это имя персонажа (первое слово), а не полное составное имя,
     поэтому `hide cs` отрабатывает корректно без явного sprite_tag."""
     composite = rm.find_composite_by_name(node.sprite_var) if (rm is not None and node.sprite_var) else None
@@ -124,6 +125,12 @@ def _apply_node(state: SceneState, node: SceneNode, is_current: bool, rm=None):
             tag, _ = _resolve_sprite_tag(node, rm)
             if tag and tag in state.sprites:
                 del state.sprites[tag]
+    elif t == NodeType.NVL_MODE:
+        if node.nvl_action == "enter":
+            state.nvl_mode = True
+        elif node.nvl_action == "exit":
+            state.nvl_mode = False
+                                                            
 
     if is_current:
         if t == NodeType.DIALOGUE:

@@ -64,6 +64,16 @@ def apply_dark_theme(app):
             border-radius: 8px; padding: 5px 9px;
         }}
 
+        /* ---------- Progress bars (git commit и т.п.) ---------- */
+        QProgressBar {{
+            background: {GLASS_BASE}; color: {ACCENT_TEXT}; border: 1px solid {GLASS_BORDER_S};
+            border-radius: 6px; text-align: center; font-weight: 600;
+        }}
+        QProgressBar::chunk {{
+            background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 {ACCENT_1}, stop:1 {ACCENT_2});
+            border-radius: 6px;
+        }}
+
         /* ---------- Buttons: glassy pill with accent glow ---------- */
         QPushButton {{
             background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 {ACCENT_1}, stop:1 {ACCENT_2});

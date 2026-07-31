@@ -14,6 +14,18 @@ _GROUPABLE_TRANSITION_TYPES = {
 }
 
 
+def _resource_volume(var: str, rm=None) -> Optional[float]:
+    """Громкость по умолчанию для ресурса (задаётся в менеджере ресурсов),
+    если она есть - иначе None (звук/музыка проигрываются без volume,
+    как раньше)."""
+    if rm is None or not var:
+        return None
+    try:
+        return rm.get_volume_by_var(var)
+    except Exception:
+        return None
+
+
 def _fmt_seconds(value) -> str:
     """Форматирует число секунд для fadein/fadeout: целые без '.0' (3, не 3.0),
     дробные с одним знаком после запятой (1.5)."""
@@ -24,10 +36,10 @@ def _fmt_seconds(value) -> str:
 
 
 def _sprite_tag(node: SceneNode, rm=None) -> str:
-    """Тег спрайта по умолчанию: для составных спрайтов из sprites.rpy — имя
+    """Тег спрайта по умолчанию: для составных спрайтов из sprites.rpy - имя
     персонажа (первое слово имени), как и ожидает Ren'Py при show с составным
-    именем (он сам берёт первое слово как тег) — поэтому hide cs работает,
-    а не hide "cs normal stethoscope far". Для обычных спрайтов — var_name
+    именем (он сам берёт первое слово как тег) - поэтому hide cs работает,
+    а не hide "cs normal stethoscope far". Для обычных спрайтов - var_name
     целиком, как раньше."""
     if node.sprite_tag:
         return node.sprite_tag
@@ -39,7 +51,7 @@ def _sprite_tag(node: SceneNode, rm=None) -> str:
 
 
 def _render_sprite_show_lines(node: SceneNode, pad: str) -> List[str]:
-    """Строки show-блока одного спрайта БЕЗ завершающего with — он добавляется
+    """Строки show-блока одного спрайта БЕЗ завершающего with - он добавляется
     отдельно вызывающей стороной (см. _render_sprite_group), чтобы несколько
     спрайтов с одинаковым переходом можно было объединить в один with-блок."""
     spr = node.sprite_var or ""
@@ -76,7 +88,7 @@ def _render_sprite_group(nodes: List[SceneNode], pad: str) -> List[str]:
 
 
 def _render_node_no_transition(node: SceneNode, pad: str) -> List[str]:
-    """Рендерит 'тело' групппируемой ноды БЕЗ хвостового 'with X' — для нод,
+    """Рендерит 'тело' групппируемой ноды БЕЗ хвостового 'with X' - для нод,
     которые попали в общую группу с единым переходом (см. _group_with_runs).
     Поддерживает только типы из _GROUPABLE_TRANSITION_TYPES."""
     t = node.node_type
@@ -94,10 +106,25 @@ def _render_node_no_transition(node: SceneNode, pad: str) -> List[str]:
 
 
 def generate_node(node: SceneNode, indent: int = 1, active_sprites: Optional[Dict[str, str]] = None,
-                   rm=None, custom_templates: Optional[CustomNodeTemplateStore] = None) -> List[str]:
+                   rm=None, custom_templates: Optional[CustomNodeTemplateStore] = None,
+                   nvl_state: Optional[Dict[str, bool]] = None, nvl_style: str = "character") -> List[str]:
     """
+    nvl_state: {"on": bool} - включён ли сейчас NVL-режим (см. NodeType.NVL_MODE)
+    в точке ПЕРЕД этим узлом. Как и active_sprites, это общий изменяемый
+    словарь, который generate_full_script прокидывает по всей генерации (и
+    рекурсивно - в ветки меню), обновляя его при встрече NVL_MODE-ноды.
+
+    nvl_style - как переключение NVL/ADV попадает в код (настройка в
+    Settings, core.app_settings.AppSettings.nvl_codegen_style):
+      "character" (по умолчанию) - реплики говорят через персонажа-компаньона
+        `{var}_nvl` (define генерируется автоматически), а безымянный
+        нарратор - через встроенного nvl_narrator.
+      "function" - реплики остаются обычными (var "текст"), а переключение
+        режима идёт через $ set_mode_nvl() / $ set_mode_adv() (эти функции
+        нужно определить самостоятельно в проекте, редактор их не создаёт).
+
     active_sprites: словарь {tag: group_path верхнего уровня (имя папки персонажа)}
-    активных на сцене спрайтов на момент ДО этого узла — нужен только для
+    активных на сцене спрайтов на момент ДО этого узла - нужен только для
     HIDE_SPRITE с hide_group (скрыть "любой спрайт этого персонажа"), чтобы
     сгенерировать `hide <реальный_тег>` вместо неизвестной папки.
     Вызывающая сторона (generate_full_script) обновляет active_sprites после
@@ -105,7 +132,7 @@ def generate_node(node: SceneNode, indent: int = 1, active_sprites: Optional[Dic
 
     ВАЖНО: SHOW_SPRITE сюда передаётся для узлов, которые НЕ группируются
     (одиночный показ спрайта, не подряд с другими show_sprite одинакового
-    перехода) — группировка происходит на уровне generate_full_script,
+    перехода) - группировка происходит на уровне generate_full_script,
     которая вызывает _render_sprite_group напрямую для серий подряд идущих
     show_sprite с одинаковым переходом, минуя generate_node для них.
     """
@@ -161,7 +188,9 @@ def generate_node(node: SceneNode, indent: int = 1, active_sprites: Optional[Dic
         if node.music_var:
             fadeout = f" fadeout {_fmt_seconds(node.music_fadeout)}" if node.music_fadeout else ""
             fadein = f" fadein {_fmt_seconds(node.music_fadein)}" if node.music_fadein else ""
-            lines.append(f"{pad}play music {node.music_var}{fadeout}{fadein}")
+            vol = _resource_volume(node.music_var, rm)
+            volume = f" volume {vol:.2f}" if vol is not None else ""
+            lines.append(f"{pad}play music {node.music_var}{fadeout}{fadein}{volume}")
     elif t == NodeType.STOP_MUSIC:
         fadeout = f" fadeout {_fmt_seconds(node.music_fadeout)}" if node.music_fadeout else ""
         lines.append(f"{pad}stop music{fadeout}")
@@ -169,7 +198,9 @@ def generate_node(node: SceneNode, indent: int = 1, active_sprites: Optional[Dic
         if node.ambience_var:
             fadeout = f" fadeout {_fmt_seconds(node.ambience_fadeout)}" if node.ambience_fadeout else ""
             fadein = f" fadein {_fmt_seconds(node.ambience_fadein)}" if node.ambience_fadein else ""
-            lines.append(f"{pad}play ambience {node.ambience_var}{fadeout}{fadein}")
+            vol = _resource_volume(node.ambience_var, rm)
+            volume = f" volume {vol:.2f}" if vol is not None else ""
+            lines.append(f"{pad}play ambience {node.ambience_var}{fadeout}{fadein}{volume}")
     elif t == NodeType.STOP_AMBIENCE:
         fadeout = f" fadeout {_fmt_seconds(node.ambience_fadeout)}" if node.ambience_fadeout else ""
         lines.append(f"{pad}stop ambience{fadeout}")
@@ -181,16 +212,39 @@ def generate_node(node: SceneNode, indent: int = 1, active_sprites: Optional[Dic
             lines.append(f"{pad}with {node.transition}")
     elif t == NodeType.PLAY_SOUND:
         if node.sound_var:
-            lines.append(f"{pad}play sound {node.sound_var}")
+            vol = _resource_volume(node.sound_var, rm)
+            volume = f" volume {vol:.2f}" if vol is not None else ""
+            lines.append(f"{pad}play sound {node.sound_var}{volume}")
     elif t == NodeType.DIALOGUE:
         text = node.text.replace('"', '\\"')
+        nvl_on = bool(nvl_state and nvl_state.get("on"))
+        use_character_routing = nvl_on and nvl_style == "character"
         if node.character_var:
-            lines.append(f'{pad}{node.character_var} "{text}"')
+            speaker = f"{node.character_var}_nvl" if use_character_routing else node.character_var
+            lines.append(f'{pad}{speaker} "{text}"')
         else:
-            lines.append(f'{pad}"{text}"')
+            speaker = "nvl_narrator " if use_character_routing else ""
+            lines.append(f'{pad}{speaker}"{text}"')
     elif t == NodeType.NARRATION:
         text = node.text.replace('"', '\\"')
-        lines.append(f'{pad}"{text}"')
+        nvl_on = bool(nvl_state and nvl_state.get("on"))
+        speaker = "nvl_narrator " if (nvl_on and nvl_style == "character") else ""
+        lines.append(f'{pad}{speaker}"{text}"')
+    elif t == NodeType.NVL_MODE:
+        if node.nvl_action == "enter":
+            if nvl_state is not None:
+                nvl_state["on"] = True
+            if nvl_style == "function":
+                lines.append(f"{pad}$ set_mode_nvl()")
+            else:
+                lines.append(f"{pad}nvl clear")
+        elif node.nvl_action == "clear":
+            lines.append(f"{pad}nvl clear")
+        elif node.nvl_action == "exit":
+            if nvl_state is not None:
+                nvl_state["on"] = False
+            if nvl_style == "function":
+                lines.append(f"{pad}$ set_mode_adv()")
     elif t == NodeType.PAUSE:
         if node.pause_duration > 0:
             lines.append(f"{pad}pause {node.pause_duration:.1f}")
@@ -206,10 +260,30 @@ def generate_node(node: SceneNode, indent: int = 1, active_sprites: Optional[Dic
         lines.append(f'{pad}menu:')
         if prompt:
             lines.append(f'{pad}{INDENT}"{prompt}"')
-        for ct, cj, use_call, raw_body in node.normalized_menu_choices():
+        for ct, cj, use_call, raw_body, choice_nodes in node.normalized_menu_choices():
             ct = ct.replace('"', '\\"')
             lines.append(f'{pad}{INDENT}"{ct}":')
-            if raw_body and raw_body.strip():
+            if choice_nodes:
+                                                                              
+                                                                        
+                                                                           
+                                                                          
+                                                                           
+                                                                   
+                branch_sprites = dict(active_sprites) if active_sprites is not None else {}
+                branch_nvl = dict(nvl_state) if nvl_state is not None else {"on": False}
+                wrote_any = False
+                for cn in choice_nodes:
+                    sub_lines = generate_node(cn, indent + 2, active_sprites=branch_sprites,
+                                               rm=rm, custom_templates=custom_templates,
+                                               nvl_state=branch_nvl, nvl_style=nvl_style)
+                    if sub_lines:
+                        lines.extend(sub_lines)
+                        wrote_any = True
+                    _update_active_sprites(branch_sprites, cn, rm=rm)
+                if not wrote_any:
+                    lines.append(f'{pad}{INDENT}{INDENT}pass')
+            elif raw_body and raw_body.strip():
                                                                          
                                                           
                 for bl in raw_body.splitlines():
@@ -238,7 +312,7 @@ def generate_node(node: SceneNode, indent: int = 1, active_sprites: Optional[Dic
 def _render_custom_node(node: SceneNode, pad: str, custom_templates: Optional[CustomNodeTemplateStore]) -> List[str]:
     """Рендерит пользовательскую ноду (см. core/custom_node_templates.py) по
     её Jinja2-шаблону кода. Если хранилище шаблонов не передано, шаблон не
-    найден или Jinja2 не установлен — выводит предупреждающий комментарий
+    найден или Jinja2 не установлен - выводит предупреждающий комментарий
     вместо кода (чтобы не потерять ноду молча)."""
     if custom_templates is None:
         return [f"{pad}{COMMENT_PREFIX} [пользовательская нода: хранилище шаблонов недоступно]"]
@@ -255,7 +329,7 @@ def _render_custom_node(node: SceneNode, pad: str, custom_templates: Optional[Cu
 
 
 def _update_active_sprites(active_sprites: Dict[str, str], node: SceneNode, rm=None):
-    """Обновляет словарь {tag: top_group} активных спрайтов по факту узла —
+    """Обновляет словарь {tag: top_group} активных спрайтов по факту узла -
     используется генератором, чтобы знать состояние сцены при встрече
     HIDE_SPRITE с hide_group. Логика зеркалит core/scene_state.py."""
     t = node.node_type
@@ -301,7 +375,7 @@ def _group_with_runs(nodes: List[SceneNode]) -> List[List[SceneNode]]:
         window hide with dissolve
         scene black with dissolve
 
-    (два последовательных перехода вместо одного общего — на импорте
+    (два последовательных перехода вместо одного общего - на импорте
     rpy_script_import.py кладёт оба узла в очередь 'pending' и присваивает
     им один и тот же transition, см. _PENDING_TRANSITION_TYPES; здесь это
     собирается обратно в исходную форму)."""
@@ -335,7 +409,22 @@ def _group_with_runs(nodes: List[SceneNode]) -> List[List[SceneNode]]:
     return units
 
 
-def generate_full_script(project: Project, rm=None, custom_templates: Optional[CustomNodeTemplateStore] = None) -> str:
+def _project_uses_nvl(project: Project) -> bool:
+    def walk(nodes) -> bool:
+        for node in nodes:
+            if node.node_type == NodeType.NVL_MODE:
+                return True
+            if node.node_type == NodeType.MENU:
+                for _t, _j, _uc, _rb, choice_nodes in node.normalized_menu_choices():
+                    if choice_nodes and walk(choice_nodes):
+                        return True
+        return False
+
+    return any(walk(scene.nodes) for scene in project.scenes)
+
+
+def generate_full_script(project: Project, rm=None, custom_templates: Optional[CustomNodeTemplateStore] = None,
+                          nvl_style: str = "character") -> str:
     lines = [
         f"{COMMENT_PREFIX} Сценарий: {project.title}",
         f"{COMMENT_PREFIX} Сгенерировано RenPy Visual Editor",
@@ -347,8 +436,22 @@ def generate_full_script(project: Project, rm=None, custom_templates: Optional[C
             lines.append(ch.to_renpy())
         lines.append("")
 
+    uses_nvl = _project_uses_nvl(project)
+    if uses_nvl and project.characters and nvl_style == "character":
+        lines.append(f"{COMMENT_PREFIX} ===== NVL-варианты персонажей (для NVL_MODE-нод) =====")
+        for ch in project.characters:
+            lines.append(ch.to_renpy_nvl())
+        lines.append("")
+    if uses_nvl and nvl_style == "function":
+        lines.append(
+            f"{COMMENT_PREFIX} NVL/ADV переключаются через $ set_mode_nvl() / $ set_mode_adv() -"
+        )
+        lines.append(f"{COMMENT_PREFIX} эти функции нужно определить самостоятельно (см. настройки редактора).")
+        lines.append("")
+
     lines.append(f"label {project.label_name}:")
     lines.append("")
+    nvl_state: Dict[str, bool] = {"on": False}
     for scene in project.scenes:
         lines.append(f"{INDENT}{COMMENT_PREFIX} --- {scene.name} ---")
         active_sprites: Dict[str, str] = {}
@@ -362,7 +465,8 @@ def generate_full_script(project: Project, rm=None, custom_templates: Optional[C
             else:
                 node = unit[0]
                 lines.extend(generate_node(node, indent=1, active_sprites=active_sprites, rm=rm,
-                                            custom_templates=custom_templates))
+                                            custom_templates=custom_templates, nvl_state=nvl_state,
+                                            nvl_style=nvl_style))
                 _update_active_sprites(active_sprites, node, rm=rm)
         lines.append("")
     lines.append(f"{INDENT}return")

@@ -5,7 +5,7 @@
 Проходит по всем сценам/нодам проекта и ищет/заменяет текст в:
 - репликах диалога и повествования (node.text)
 - вопросе меню (node.menu_prompt) и текстах вариантов меню (menu_choices)
-- тексте комментариев (node.comment_text) — опционально, включается флагом
+- тексте комментариев (node.comment_text) - опционально, включается флагом
 
 Совпадения возвращаются как список FindMatch (для предпросмотра перед
 заменой), замена выполняется отдельной функцией apply_replace_all,
@@ -99,11 +99,14 @@ def apply_replace_all(project: Project, query: str, replacement: str, case_sensi
                     total += n
 
                 new_choices = []
-                for text, jump, use_call, raw_body in node.normalized_menu_choices():
+                for text, jump, use_call, raw_body, nodes in node.normalized_menu_choices():
                     new_choice_text, n2 = pattern.subn(replacement, text or "")
                     if n2:
                         total += n2
-                    new_choices.append((new_choice_text, jump, use_call, raw_body))
+                    new_choices.append({
+                        "text": new_choice_text, "jump": jump, "use_call": use_call,
+                        "raw_body": raw_body, "nodes": nodes,
+                    })
                 node.menu_choices = new_choices
 
             if include_comments and node.node_type == NodeType.COMMENT:

@@ -1,12 +1,12 @@
 """
-GlassPanel — a QFrame that renders a real, live-blurred "backdrop" behind
+GlassPanel - a QFrame that renders a real, live-blurred "backdrop" behind
 itself (true glassmorphism), instead of faking translucency with a flat
 rgba() fill in QSS.
 
 How it works:
     1. Periodically (and on resize/show), it hides itself for a single,
-       synchronous render() call of its parent — so no frame is ever
-       actually displayed without it — captures the pixels that would be
+       synchronous render() call of its parent - so no frame is ever
+       actually displayed without it - captures the pixels that would be
        behind it, then shows itself again.
     2. That captured pixmap is blurred off-screen using QGraphicsBlurEffect
        rendered through a QGraphicsScene.
