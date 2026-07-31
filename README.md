@@ -11,7 +11,7 @@
   <a href="docs/WIKI_EN.md">Wiki (EN)</a>
 </p>
 
-![Главное окно редактора](docs/editor_main.png)
+![Главное окно редактора](docs/images/editor_main.png)
 ---
 ## 🚀 Возможности
 
