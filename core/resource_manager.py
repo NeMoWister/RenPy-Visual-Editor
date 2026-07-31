@@ -40,6 +40,7 @@ class ResourceEntry:
 class ResourceConfig:
     custom_name: str = ""
     custom_var: str = ""
+    volume: Optional[float] = None
 
 
 @dataclass
@@ -93,7 +94,7 @@ class ResourceManager:
 
     def export_overrides(self, path: str):
         """Сохраняет ТОЛЬКО переопределения имён (без пути к ресурсам, который
-        специфичен для конкретного проекта) в отдельный JSON-файл — чтобы
+        специфичен для конкретного проекта) в отдельный JSON-файл - чтобы
         можно было перенести их в другой проект или сохранить как резервную
         копию именования ресурсов."""
         data = {
@@ -104,12 +105,12 @@ class ResourceManager:
 
     def import_overrides(self, path: str, merge: bool = True) -> int:
         """Загружает переопределения имён из файла, созданного export_overrides.
-        merge=True — добавляет/перезаписывает поверх текущих (по rel_path);
-        merge=False — полностью заменяет текущий набор переопределений.
+        merge=True - добавляет/перезаписывает поверх текущих (по rel_path);
+        merge=False - полностью заменяет текущий набор переопределений.
         Возвращает количество загруженных записей. Не сканирует ресурсы и не
-        сохраняет config сам — это должна сделать вызывающая сторона после
+        сохраняет config сам - это должна сделать вызывающая сторона после
         (rescan + save_config), потому что переопределения для путей, которых
-        нет в текущем проекте, всё равно безопасно хранить — они просто не
+        нет в текущем проекте, всё равно безопасно хранить - они просто не
         применятся, пока такой файл не появится."""
         with open(path, 'r', encoding='utf-8') as f:
             data = json.load(f)
@@ -185,14 +186,14 @@ class ResourceManager:
 
     def _scan_composite_sprites(self):
         """Если в <default|custom>/sprites/sprites.rpy есть составные
-        спрайты (ConditionSwitch / im.MatrixColor с im.Composite слоями) —
+        спрайты (ConditionSwitch / im.MatrixColor с im.Composite слоями) -
         парсим их отдельно (из обоих источников сразу, если файл есть в
         обоих) и убираем использованные в них файлы из обычного плоского
         списка self.resources['sprites'], чтобы один и тот же файл не
         показывался дважды (как отдельный слой и как часть составного
         спрайта). Файлы, не упомянутые в sprites.rpy, продолжают работать
-        как раньше — обычными папочными спрайтами. Составные спрайты не
-        попадают в generate_define_block независимо от источника — они уже
+        как раньше - обычными папочными спрайтами. Составные спрайты не
+        попадают в generate_define_block независимо от источника - они уже
         объявлены в самом sprites.rpy."""
         self.composite_sprites = []
         used_rel_paths_by_source = {"default": set(), "custom": set()}
@@ -273,13 +274,13 @@ class ResourceManager:
     def _auto_var(self, cat: str, fn: str, group_path: str) -> str:
         """Автоматическое имя ресурса (если не задано своё через overrides).
         Формат зависит от категории:
-        - bg/cg:     "bg bus_stop" / "cg d1_food_normal" — имя ЧЕРЕЗ ПРОБЕЛ
+        - bg/cg:     "bg bus_stop" / "cg d1_food_normal" - имя ЧЕРЕЗ ПРОБЕЛ
                      (как у составных спрайтов: show bg bus_stop).
-        - sprites:   как раньше — конкатенация подчёркиванием с учётом
+        - sprites:   как раньше - конкатенация подчёркиванием с учётом
                      подпапок персонажа/вариации (sprites_us_normal_smile).
-        - music:     music_list["name"] — ссылка на словарь треков, который
+        - music:     music_list["name"] - ссылка на словарь треков, который
                      уже определён в проекте Ren'Py, мы его не генерируем.
-        - sounds:    sfx_name — как раньше, просто с новым префиксом."""
+        - sounds:    sfx_name - как раньше, просто с новым префиксом."""
         name = filename_to_var(fn)
         if cat in ('bg', 'cg'):
             return f"{self.RENPY_PREFIX[cat]} {name}"
@@ -298,7 +299,7 @@ class ResourceManager:
     def get_folders(self, category: str, parent_path: str = "") -> List[str]:
         """Возвращает имена непосредственных подпапок внутри parent_path для
         категории (только для NESTED_CATEGORIES). Например, для sprites и
-        parent_path="" вернёт ['un', 'us'], а для parent_path="us" — ['close', 'far', 'normal']
+        parent_path="" вернёт ['un', 'us'], а для parent_path="us" - ['close', 'far', 'normal']
         (если они существуют как папки), отсортированные по алфавиту."""
         if category not in self.NESTED_CATEGORIES:
             return []
@@ -334,7 +335,7 @@ class ResourceManager:
 
     def get_composite_positions(self, character: str) -> List[str]:
         """Доступные позиции (far/close/normal) для персонажа, в фиксированном
-        порядке far -> close -> normal (а не алфавитном) — это привычный
+        порядке far -> close -> normal (а не алфавитном) - это привычный
         порядок 'от дальнего плана к ближнему' для художников по сценам."""
         order = ["far", "close", "normal"]
         present = set(cs.position for cs in self.composite_sprites if cs.character == character)
@@ -357,15 +358,45 @@ class ResourceManager:
         return None
 
     def resolve_layer_path(self, rel_path: str, source: str = "custom") -> str:
-        """Абсолютный путь к файлу слоя составного спрайта (rel_path —
+        """Абсолютный путь к файлу слоя составного спрайта (rel_path -
         относительно <source>/sprites/, например 'far/cs/cs_1_body.png').
-        source берётся из CompositeSprite.source — каждый sprites.rpy ищет
+        source берётся из CompositeSprite.source - каждый sprites.rpy ищет
         свои слои в той же папке (default или custom), где сам лежит."""
         return os.path.join(self.get_source_root(source), 'sprites', rel_path)
 
-    def set_override(self, rel_path: str, name: str = "", var: str = ""):
-        self.config.overrides[rel_path] = ResourceConfig(custom_name=name, custom_var=var)
+    def set_override(self, rel_path: str, name: str = "", var: str = "", volume: Optional[float] = None):
+        """volume=None здесь означает 'не трогать' - если у ресурса уже была
+        задана громкость по умолчанию, она сохранится при переименовании."""
+        existing = self.config.overrides.get(rel_path)
+        if volume is None and existing is not None:
+            volume = existing.volume
+        self.config.overrides[rel_path] = ResourceConfig(custom_name=name, custom_var=var, volume=volume)
         self.save_config()
+
+    def get_volume(self, rel_path: str) -> Optional[float]:
+        cfg = self.config.overrides.get(rel_path)
+        return cfg.volume if cfg else None
+
+    def set_volume(self, rel_path: str, volume: Optional[float]):
+        """Отдельный сеттер только для громкости - не трогает имя/переменную,
+        и убирает пустую запись overrides[rel_path], если после сброса
+        громкости в ней больше ничего не осталось (как и раньше для имён)."""
+        existing = self.config.overrides.get(rel_path, ResourceConfig())
+        existing.volume = volume
+        if existing.custom_name or existing.custom_var or existing.volume is not None:
+            self.config.overrides[rel_path] = existing
+        elif rel_path in self.config.overrides:
+            del self.config.overrides[rel_path]
+        self.save_config()
+
+    def get_volume_by_var(self, var_name: str) -> Optional[float]:
+        """Громкость по умолчанию для ресурса по его var_name (как записано
+        в SceneNode.music_var/sound_var/ambience_var) - используется генератором
+        кода. Возвращает None, если ресурс не найден или громкость не задана."""
+        entry = self.find_by_var(var_name)
+        if entry is None:
+            return None
+        return self.get_volume(entry.rel_path)
 
     def generate_define_block(self) -> str:
         lines = ["# ===== Определения ресурсов =====", ""]
@@ -391,7 +422,7 @@ class ResourceManager:
             lines.append("")
         if self.composite_sprites:
             lines.append("# Составные спрайты (персонаж/позиция/эмоция) уже определены")
-            lines.append("# в sprites.rpy — убедитесь, что этот файл подключён к проекту")
+            lines.append("# в sprites.rpy - убедитесь, что этот файл подключён к проекту")
             lines.append("# Ren'Py, отдельных image здесь не нужно (для default и custom")
             lines.append("# источников одинаково).")
             lines.append("")

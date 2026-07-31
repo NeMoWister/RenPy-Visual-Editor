@@ -1,7 +1,7 @@
 """
 Экспорт сценария в простой текстовый формат («скринплей») для вычитки
 редактором/сценаристом без программы, и обратный импорт правок текста
-(раунд-трип). Editор правит ТОЛЬКО текст реплик/меню — структура сцен,
+(раунд-трип). Editор правит ТОЛЬКО текст реплик/меню - структура сцен,
 типы нод, переходы и т.п. в этом файле не редактируются: строки с
 техническими метками ([фон: ...] и т.п.) при импорте игнорируются, только
 информируют читателя.
@@ -16,7 +16,7 @@
     - Пойти домой  {#a1b2c3d4:0}
 
 Хвостовой якорь {#node_id} (или {#node_id:choice_index} для вариантов меню)
-используется ТОЛЬКО для обратного сопоставления при импорте — сам текст
+используется ТОЛЬКО для обратного сопоставления при импорте - сам текст
 редактировать можно свободно, а якорь трогать не нужно (при импорте строки
 без якоря или с нераспознанным id просто игнорируются, с предупреждением).
 """
@@ -38,10 +38,10 @@ def _character_display(project: Project, var: str) -> str:
 
 def export_screenplay(project: Project) -> str:
     lines: List[str] = []
-    lines.append(f"# {project.title} — текст для вычитки")
-    lines.append("# Правьте только текст реплик. Строки в [квадратных скобках] — служебная")
+    lines.append(f"# {project.title} - текст для вычитки")
+    lines.append("# Правьте только текст реплик. Строки в [квадратных скобках] - служебная")
     lines.append("# информация (фон/музыка/переходы), при импорте они игнорируются.")
-    lines.append("# Хвостовые метки вида {#abcd1234} не трогайте — по ним подтягиваются правки обратно.")
+    lines.append("# Хвостовые метки вида {#abcd1234} не трогайте - по ним подтягиваются правки обратно.")
     lines.append("")
 
     for scene in project.scenes:
@@ -72,7 +72,7 @@ def export_screenplay(project: Project) -> str:
                     lines.append(f"[МЕНЮ] {node.menu_prompt}  {{#{node.node_id}}}")
                 else:
                     lines.append(f"[МЕНЮ]  {{#{node.node_id}}}")
-                for i, (ct, cj, use_call, raw_body) in enumerate(node.normalized_menu_choices()):
+                for i, (ct, cj, use_call, raw_body, _nodes) in enumerate(node.normalized_menu_choices()):
                     lines.append(f"  - {ct}  {{#{node.node_id}:{i}}}")
             lines.append("")
         lines.append("")
@@ -157,10 +157,13 @@ def apply_screenplay_import(project: Project, text: str) -> ImportResult:
             if node.node_type == NodeType.MENU:
                 choices = node.normalized_menu_choices()
                 if 0 <= choice_idx < len(choices):
-                    ct, cj, use_call, raw_body = choices[choice_idx]
+                    ct, cj, use_call, raw_body, nodes = choices[choice_idx]
                     if ct != new_text:
-                        choices[choice_idx] = (new_text, cj, use_call, raw_body)
-                        node.menu_choices = choices
+                        choices[choice_idx] = (new_text, cj, use_call, raw_body, nodes)
+                        node.menu_choices = [
+                            {"text": t, "jump": j, "use_call": uc, "raw_body": rb, "nodes": nds}
+                            for t, j, uc, rb, nds in choices
+                        ]
                         result.updated += 1
 
     return result

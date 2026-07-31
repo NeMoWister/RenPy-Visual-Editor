@@ -93,9 +93,16 @@ class ImportScriptDialog(QDialog):
         right_l.addWidget(QLabel("Нераспознанные строки (будут PYTHON-узлами):"))
         self.unrecog_edit = QTextEdit()
         self.unrecog_edit.setReadOnly(True)
-        self.unrecog_edit.setPlaceholderText("Нераспознанного нет — отлично!")
+        self.unrecog_edit.setPlaceholderText("Нераспознанного нет - отлично!")
         self.unrecog_edit.setStyleSheet("background:#1c1c22; color:#ddd; border:1px solid #3a3a46;")
         right_l.addWidget(self.unrecog_edit, 1)
+
+        right_l.addWidget(QLabel("⚠ Импортированы, но ресурс не найден - нужно добавить:"))
+        self.needs_res_edit = QTextEdit()
+        self.needs_res_edit.setReadOnly(True)
+        self.needs_res_edit.setPlaceholderText("Все ресурсы найдены - отлично!")
+        self.needs_res_edit.setStyleSheet("background:#241c14; color:#ffcf8a; border:1px solid #4a3a20;")
+        right_l.addWidget(self.needs_res_edit, 1)
         splitter.addWidget(right_w)
         splitter.setSizes([560, 300])
 
@@ -167,9 +174,16 @@ class ImportScriptDialog(QDialog):
     def _fill_unrecognized(self):
         if not self.report.unrecognized:
             self.unrecog_edit.setPlainText("")
-            return
-        lines = [f"Строка {ln}: {txt}" for ln, txt in self.report.unrecognized]
-        self.unrecog_edit.setPlainText('\n'.join(lines))
+        else:
+            lines = [f"Строка {ln}: {txt}" for ln, txt in self.report.unrecognized]
+            self.unrecog_edit.setPlainText('\n'.join(lines))
+
+        needs_res = getattr(self.report, "needs_resource", [])
+        if not needs_res:
+            self.needs_res_edit.setPlainText("")
+        else:
+            lines = [f"Строка {ln}: {txt}  →  ресурс «{var}»" for ln, txt, var in needs_res]
+            self.needs_res_edit.setPlainText('\n'.join(lines))
 
                                                                           
 

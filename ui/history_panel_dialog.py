@@ -1,5 +1,5 @@
 """
-Панель истории последних действий — список меток из UndoManager с
+Панель истории последних действий - список меток из UndoManager с
 возможностью отменить сразу до конкретного шага (а не жать Ctrl+Z много
 раз).
 """
@@ -23,9 +23,9 @@ class HistoryPanelDialog(QDialog):
         layout = QVBoxLayout(self)
 
         info = QLabel(
-            "Последние действия (сверху — самое недавнее). Выберите шаг и "
+            "Последние действия (сверху - самое недавнее). Выберите шаг и "
             "нажмите «Отменить до этого шага», чтобы вернуться в состояние "
-            "ПЕРЕД ним — все более поздние действия будут отменены разом."
+            "ПЕРЕД ним - все более поздние действия будут отменены разом."
         )
         info.setWordWrap(True)
         info.setStyleSheet("color:#888; font-size:11px;")
@@ -52,7 +52,7 @@ class HistoryPanelDialog(QDialog):
         self.list_widget.clear()
         labels = self.undo_manager.history_labels()                    
         if not labels:
-            item = QListWidgetItem("(история пуста — отменять нечего)")
+            item = QListWidgetItem("(история пуста - отменять нечего)")
             self.list_widget.addItem(item)
             self.btn_undo_to.setEnabled(False)
             return

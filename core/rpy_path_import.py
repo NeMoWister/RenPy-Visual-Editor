@@ -1,7 +1,7 @@
                        
 """
 Импорт имён/путей из произвольных .rpy файлов проекта (не только
-sprites.rpy — для составных спрайтов есть отдельный composite_sprite_parser).
+sprites.rpy - для составных спрайтов есть отдельный composite_sprite_parser).
 
 Распознаёт три простых, но самых частых паттерна обычного Ren'Py-проекта:
 
@@ -12,7 +12,7 @@ sprites.rpy — для составных спрайтов есть отдель
 
 Сознательно НЕ пытается понять произвольный Python/составные образы вида
 ConditionSwitch/im.Composite (это синтаксис, под который заточен
-composite_sprite_parser.py) — здесь только однозначные "имя = путь"
+composite_sprite_parser.py) - здесь только однозначные "имя = путь"
 присвоения, которые можно безопасно сопоставить с файлами на диске.
 Всё, что не подошло по формату, просто пропускается, ничего не падает.
 """
@@ -27,8 +27,8 @@ _IMAGE_RE = re.compile(r'^[ \t]*image[ \t]+([a-zA-Z0-9_ ]+?)[ \t]*=[ \t]*"([^"]+
 _DEFINE_RE = re.compile(r'^[ \t]*define[ \t]+([a-zA-Z_][a-zA-Z0-9_.]*)[ \t]*=[ \t]*"([^"]+)"', re.MULTILINE)
 _CHARACTER_HEAD_RE = re.compile(r'^[ \t]*define[ \t]+([a-zA-Z_][a-zA-Z0-9_]*)[ \t]*=[ \t]*Character\(', re.MULTILINE)
 _MUSIC_LIST_HEAD_RE = re.compile(r'^[ \t]*music_list[ \t]*=[ \t]*\{', re.MULTILINE)
-_QUOTED_RE = re.compile(r'"((?:[^"\\]|\\.)*)"')
-_COLOR_KW_RE = re.compile(r'color\s*=\s*"([^"]+)"')
+_QUOTED_RE = re.compile(r'"((?:[^"\\]|\\.)*)"|\'((?:[^\'\\]|\\.)*)\'')
+_COLOR_KW_RE = re.compile(r'color\s*=\s*(?:"([^"]+)"|\'([^\']+)\')')
 
 
 @dataclass
@@ -68,7 +68,7 @@ def _looks_like_path(value: str) -> bool:
 
 def _extract_balanced(text: str, open_idx: int, open_ch='(', close_ch=')') -> Optional[str]:
     """Возвращает содержимое сбалансированных скобок начиная с open_idx
-    (индекс самой открывающей скобки), без них самих. None — если скобки
+    (индекс самой открывающей скобки), без них самих. None - если скобки
     в тексте не закрылись (повреждённый/неожиданный синтаксис)."""
     depth = 0
     j = open_idx
@@ -84,7 +84,7 @@ def _extract_balanced(text: str, open_idx: int, open_ch='(', close_ch=')') -> Op
 
 
 def parse_image_and_define_paths(text: str, source_file: str = "") -> List[ParsedPathDef]:
-    """Простые присвоения путей: image X = "путь" / define X = "путь" —
+    """Простые присвоения путей: image X = "путь" / define X = "путь" -
     тот же формат, который сам редактор генерирует (см.
     ResourceManager.generate_define_block), поэтому импорт по сути обратная
     операция к экспорту. Строки, где значение не похоже на путь к
@@ -119,11 +119,17 @@ def parse_characters(text: str, source_file: str = "") -> List[ParsedCharacterDe
         quoted = _QUOTED_RE.findall(inner)
         if not quoted:
             continue
+        name = quoted[0][0] or quoted[0][1]
+        if not name:
+            continue
         color_m = _COLOR_KW_RE.search(inner)
+        color = ""
+        if color_m:
+            color = color_m.group(1) or color_m.group(2)
         line_no = text.count('\n', 0, m.start()) + 1
         results.append(ParsedCharacterDef(
-            variable=var, name=quoted[0],
-            color=color_m.group(1) if color_m else "#ffffff",
+            variable=var, name=name,
+            color=color or "#ffffff",
             source_line=line_no, source_file=source_file,
         ))
     return results
@@ -172,7 +178,7 @@ def build_import_report(rm, path_defs: List[ParsedPathDef],
                          characters: List[ParsedCharacterDef],
                          music_entries: List[ParsedMusicEntry]) -> ImportReport:
     """Сопоставляет распарсенные пути с реально найденными на диске файлами
-    (по ResourceManager.resources[*].game_path) и строит план изменений —
+    (по ResourceManager.resources[*].game_path) и строит план изменений -
     ничего не применяет, только готовит превью для пользователя."""
     report = ImportReport(characters=characters)
 

@@ -1,1 +1,5 @@
 PyQt6>=6.4.0
+Jinja2>=3.1.0
+MarkupSafe>=2.1.0
+pymorphy3 
+pymorphy3-dicts-ru

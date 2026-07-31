@@ -19,7 +19,7 @@ RECENT_LABEL = "\U0001F551 \u041d\u0435\u0434\u0430\u0432\u043d\u0438\u0435"
 
 class DragOverlay(QLabel):
     """Единственный понятный индикатор поверх карусели во время
-    перетаскивания файлов из проводника — вместо мелких системных
+    перетаскивания файлов из проводника - вместо мелких системных
     подсказок/курсоров, которые мельтешат и выглядят как «пустые окна»."""
 
     def __init__(self, parent):
@@ -40,7 +40,7 @@ class DragOverlay(QLabel):
 
 class HWheelScrollArea(QScrollArea):
     """QScrollArea, прокручиваемая колесом мыши по горизонтали (карусель
-    ресурсов широкая, но невысокая — вертикальная прокрутка тут не нужна)."""
+    ресурсов широкая, но невысокая - вертикальная прокрутка тут не нужна)."""
 
     def wheelEvent(self, event):
         delta = event.angleDelta().y() or event.angleDelta().x()
@@ -53,7 +53,7 @@ class HWheelScrollArea(QScrollArea):
 
 
 def _build_title_row(title_text: str) -> Optional[QLabel]:
-    """Заголовок секции карусели (без слайдера — размер миниатюр фиксирован)."""
+    """Заголовок секции карусели (без слайдера - размер миниатюр фиксирован)."""
     if not title_text:
         return None
     lbl = QLabel(title_text)
@@ -168,7 +168,7 @@ class ResourceCard(QFrame):
 
     def set_suppress_tooltip(self, suppress: bool):
         """Во время drag-n-drop поверх карусели наведение курсора над
-        карточками не должно всплывать мелкими подсказками звёздочки —
+        карточками не должно всплывать мелкими подсказками звёздочки -
         они мешают и выглядят как «пустые окошки», мигающие поверх диалога
         приёма файлов. Вместо них карусель показывает один понятный
         оверлей (см. ResourceCarousel._drag_overlay)."""
@@ -242,7 +242,7 @@ class FolderCard(QFrame):
 
 class CharacterGroupPicker(QWidget):
     """Простой выбор папки персонажа верхнего уровня (resources/sprites/<имя>)
-    БЕЗ заходов внутрь — используется для 'Скрыть спрайт: выбрать персонажа
+    БЕЗ заходов внутрь - используется для 'Скрыть спрайт: выбрать персонажа
     целиком', где не важна конкретная вариация/файл, а нужно скрыть всё,
     что сейчас показано для этого персонажа."""
     selection_changed = pyqtSignal(str)                                                
@@ -349,11 +349,11 @@ class CharacterGroupPicker(QWidget):
 
 class FolderResourceCarousel(QWidget):
     """Карусель ресурсов с поддержкой навигации по вложенным папкам (для
-    категорий из ResourceManager.NESTED_CATEGORIES, на практике — sprites).
+    категорий из ResourceManager.NESTED_CATEGORIES, на практике - sprites).
 
     Поведение: показывает либо папки текущего уровня, либо файлы текущей
-    папки — определяется автоматически через ResourceManager.get_folders/
-    get_entries_in_folder. Сверху — хлебные крошки для навигации вверх.
+    папки - определяется автоматически через ResourceManager.get_folders/
+    get_entries_in_folder. Сверху - хлебные крошки для навигации вверх.
     Для категорий без подпапок ведёт себя как обычная плоская карусель.
     """
     selection_changed = pyqtSignal(object)
@@ -706,7 +706,7 @@ class ResourceCarousel(QWidget):
     def _reload_group_options(self):
         """Заполняет список категорий тегов в комбобоксе. Показывает только
         категории, у которых хотя бы один ресурс из текущего набора entries
-        имеет тег — чтобы теги bg не попадали в комбо CG и наоборот."""
+        имеет тег - чтобы теги bg не попадали в комбо CG и наоборот."""
         if not self.tags_store or not self.tags_store.categories:
             self.group_label.setVisible(False)
             self.group_combo.setVisible(False)
@@ -852,7 +852,7 @@ class ResourceCarousel(QWidget):
 
     def _favorites_and_recent_entries(self):
         """Записи избранного и недавних (из текущего self.entries) для показа
-        отдельным блоком вверху карусели — только на "верхнем уровне" (без
+        отдельным блоком вверху карусели - только на "верхнем уровне" (без
         активного поиска/тег-папки/группировки)."""
         if not self.usage_store or not self.usage_store.enabled or not self.category:
             return [], []
@@ -1064,7 +1064,7 @@ class ResourceCarousel(QWidget):
 
 
 class CompositeSpriteCard(QFrame):
-    """Карточка составного спрайта (sprites.rpy): миниатюра — это все его
+    """Карточка составного спрайта (sprites.rpy): миниатюра - это все его
     слои, наложенные друг на друга, как в самой игре, а не один файл."""
     clicked = pyqtSignal(object)
 
@@ -1147,7 +1147,7 @@ class CompositeSpriteCarousel(QWidget):
     """Навигация по составным спрайтам из resources/sprites/sprites.rpy:
     персонаж -> позиция (far/close/normal) -> эмоция/состав, с наложенными
     превью на конечном уровне. Используется наравне с FolderResourceCarousel
-    для обычных папочных спрайтов — какая из карусели показывается, решает
+    для обычных папочных спрайтов - какая из карусели показывается, решает
     node_editor в зависимости от того, есть ли составные спрайты вообще."""
     selection_changed = pyqtSignal(object)                          
 

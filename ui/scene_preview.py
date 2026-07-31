@@ -35,6 +35,7 @@ class SpriteLayer:
 class ScenePreview(QWidget):
     sprite_moved = pyqtSignal(float)
     sprite_delete_requested = pyqtSignal(str)                          
+    zoom_step_requested = pyqtSignal(int)                                                 
 
     def __init__(self):
         super().__init__()
@@ -43,6 +44,8 @@ class ScenePreview(QWidget):
         self.char_name: str = ""
         self.char_color: Optional[str] = None
         self.dialogue_text: str = ""
+        self.nvl_mode: bool = False
+        self.nvl_history: List[tuple] = []
         self.dragging_sprite_idx: Optional[int] = None
         self.drag_offset = QPoint()
         self.press_pos: Optional[QPoint] = None
@@ -54,7 +57,7 @@ class ScenePreview(QWidget):
 
     def set_scale(self, factor: float):
         """Масштабирует превью целиком (от слайдера зума), не меняя логику
-        отрисовки и попадания мышью — координаты ниже переведены в логические."""
+        отрисовки и попадания мышью - координаты ниже переведены в логические."""
         self.scale_factor = max(0.4, min(2.0, factor))
         self.setFixedSize(int(PREVIEW_W * self.scale_factor), int(PREVIEW_H * self.scale_factor))
         self.update()
@@ -82,6 +85,20 @@ class ScenePreview(QWidget):
         self.char_color = char_color
         self.dialogue_text = text
         self.update()
+
+    def set_nvl_mode(self, on: bool):
+        if self.nvl_mode != on:
+            self.nvl_mode = on
+            self.update()
+
+    def set_nvl_history(self, history: List[tuple]):
+        """history - список (char_name, text, color) уже показанных реплик
+        NVL-экрана (без текущей) в хронологическом порядке - как в режиме
+        презентации, чтобы предпросмотр вёл себя так же: каждая следующая
+        нода дописывается СНИЗУ, а не заменяет предыдущую сверху."""
+        if self.nvl_history != history:
+            self.nvl_history = history
+            self.update()
 
     def _sprite_rect(self, layer: SpriteLayer) -> QRect:
         pm = layer.pixmap
@@ -164,33 +181,99 @@ class ScenePreview(QWidget):
                 painter.drawText(hint_rect, Qt.AlignmentFlag.AlignCenter, hint_text)
 
         if self.dialogue_text or self.char_name:
-            dbox_h = 85
-            dbox_y = PREVIEW_H - dbox_h - 5
-            painter.fillRect(0, dbox_y, PREVIEW_W, dbox_h, QColor(0, 0, 0, 180))
-            if self.char_name:
-                painter.fillRect(10, dbox_y - 22, 120, 22, QColor(5, 5, 5, 220))
-                name_color = QColor(255, 255, 255)
-                if self.char_color:
-                    candidate = QColor(self.char_color)
-                    if candidate.isValid():
-                        name_color = candidate
-                painter.setPen(name_color)
-                painter.setFont(QFont("Arial", 12, QFont.Weight.Bold))
-                painter.drawText(QRect(10, dbox_y - 22, 120, 22), Qt.AlignmentFlag.AlignCenter, self.char_name)
-            painter.setPen(QColor(220, 220, 220))
-            painter.setFont(QFont("Arial", 12))
-            self._draw_rich_text(
-                painter, QRect(20, dbox_y + 10, PREVIEW_W - 40, dbox_h - 20),
-                self.dialogue_text
-            )
+            if self.nvl_mode:
+                                                                          
+                                                                           
+                                                                          
+                                                                         
+                                                                           
+                dbox_h = int(PREVIEW_H * 0.88)
+                painter.fillRect(0, 0, PREVIEW_W, dbox_h, QColor(6, 6, 10, 200))
+                painter.setPen(QColor("#ffb84d"))
+                painter.setFont(QFont("Arial", 8, QFont.Weight.Bold))
+                painter.drawText(QRect(10, 4, PREVIEW_W - 20, 14), Qt.AlignmentFlag.AlignLeft, "NVL")
+
+                pad_x = 16
+                pad_top = 20
+                base_size = 12
+                html_parts = []
+                for hist_name, hist_text, hist_color in self.nvl_history:
+                    html_parts.append(self._nvl_line_html(hist_name, hist_text, hist_color, dim=True, base_size=base_size))
+                if self.dialogue_text or self.char_name:
+                    html_parts.append(self._nvl_line_html(self.char_name, self.dialogue_text, self.char_color, dim=False, base_size=base_size))
+
+                doc = QTextDocument()
+                doc.setDefaultFont(QFont("Arial", base_size))
+                doc.setTextWidth(PREVIEW_W - 2 * pad_x)
+                doc.setHtml("".join(html_parts))
+                painter.save()
+                painter.translate(pad_x, pad_top)
+                doc.drawContents(painter)
+                painter.restore()
+            else:
+                min_dbox_h = 85
+                max_dbox_h = int(PREVIEW_H * 0.8)
+                needed_h = self._rich_text_height(self.dialogue_text, PREVIEW_W - 40, QFont("Arial", 12))
+                dbox_h = min(max_dbox_h, max(min_dbox_h, needed_h + 20))
+                dbox_y = PREVIEW_H - dbox_h - 5
+                painter.fillRect(0, dbox_y, PREVIEW_W, dbox_h, QColor(0, 0, 0, 180))
+                if self.char_name:
+                    painter.fillRect(10, dbox_y - 22, 120, 22, QColor(5, 5, 5, 220))
+                    name_color = QColor(255, 255, 255)
+                    if self.char_color:
+                        candidate = QColor(self.char_color)
+                        if candidate.isValid():
+                            name_color = candidate
+                    painter.setPen(name_color)
+                    painter.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+                    painter.drawText(QRect(10, dbox_y - 22, 120, 22), Qt.AlignmentFlag.AlignCenter, self.char_name)
+                painter.setPen(QColor(220, 220, 220))
+                painter.setFont(QFont("Arial", 12))
+                                                                              
+                                                                          
+                                                                        
+                             
+                self._draw_rich_text(
+                    painter, QRect(20, dbox_y + 10, PREVIEW_W - 40, dbox_h - 20),
+                    self.dialogue_text, clip=False
+                )
 
         painter.end()
 
-    def _draw_rich_text(self, painter: QPainter, rect: QRect, raw_text: str):
+    def _nvl_line_html(self, char_name: str, raw_text: str, color: Optional[str], dim: bool, base_size: int) -> str:
+        """Строит HTML одной реплики NVL: имя - тем же кеглем, что и текст,
+        слева от реплики (как в режиме презентации), а не отдельной крупной
+        строкой сверху."""
+        prefix_html = ""
+        if char_name:
+            c = QColor(color) if color and QColor(color).isValid() else QColor(255, 255, 255)
+            prefix_html = f'<b style="color:{c.name()}; font-size:{base_size}px;">{char_name}:</b>&nbsp;'
+        runs, _events = parse_renpy_text(raw_text) if raw_text else ([], [])
+        body_html = runs_to_html(runs, base_size=base_size) if runs else ""
+        text_color = "#8d8d92" if dim else "#e6e6e6"
+        return f'<p style="color:{text_color}; margin:0 0 8px 0; line-height:130%;">{prefix_html}{body_html}</p>'
+
+    def _rich_text_height(self, raw_text: str, width: int, font: QFont) -> int:
+        """Считает высоту, которую реально займёт реплика при заданной
+        ширине блока - используется, чтобы подогнать высоту диалогового
+        окна под текст (см. _draw_rich_text)."""
+        runs, _events = parse_renpy_text(raw_text)
+        html = runs_to_html(runs, base_size=13)
+        doc = QTextDocument()
+        doc.setDefaultFont(font)
+        doc.setTextWidth(max(1, width))
+        doc.setHtml(f'<div style="color:#dcdcdc;">{html}</div>')
+        return int(doc.size().height())
+
+    def _draw_rich_text(self, painter: QPainter, rect: QRect, raw_text: str, clip: bool = True):
         """Рендерит текст реплики с поддержкой тегов Ren'Py ({i},{b},{u},
-        {color=..},{size=..},{alpha=..}) через QTextDocument — теги видны
-        визуально в превью, но статично (без покадровой печати — та есть
-        только в режиме презентации)."""
+        {color=..},{size=..},{alpha=..}) через QTextDocument - теги видны
+        визуально в превью, но статично (без покадровой печати - та есть
+        только в режиме презентации).
+
+        clip=False (для NVL) - не обрезает документ по высоте rect: там
+        площадь под текст лишь прикидка, и если реплика длиннее ожидаемого,
+        обрезка по rect.height() рубила текст на середине."""
         runs, _events = parse_renpy_text(raw_text)
         html = runs_to_html(runs, base_size=13)
         doc = QTextDocument()
@@ -199,7 +282,10 @@ class ScenePreview(QWidget):
         doc.setHtml(f'<div style="color:#dcdcdc;">{html}</div>')
         painter.save()
         painter.translate(rect.topLeft())
-        doc.drawContents(painter, QRectF(0, 0, rect.width(), rect.height()))
+        if clip:
+            doc.drawContents(painter, QRectF(0, 0, rect.width(), rect.height()))
+        else:
+            doc.drawContents(painter)
         painter.restore()
 
     def mousePressEvent(self, event):
@@ -249,6 +335,18 @@ class ScenePreview(QWidget):
         self.hover_sprite_idx = idx
         self.setCursor(Qt.CursorShape.PointingHandCursor if idx is not None else Qt.CursorShape.ArrowCursor)
         self.update()
+
+    def wheelEvent(self, event):
+        """Ctrl+колесо - зум превью прямо здесь, как в Ren'Py (Ctrl+колесо/
+        Ctrl+=/Ctrl+- в dev-консоли). Без Ctrl - обычная прокрутка (передаём
+        родителю/QScrollArea, если превью не помещается целиком)."""
+        if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            steps = event.angleDelta().y() // 120
+            if steps != 0:
+                self.zoom_step_requested.emit(steps)
+            event.accept()
+        else:
+            super().wheelEvent(event)
 
     def leaveEvent(self, event):
         if self.hover_sprite_idx is not None:
