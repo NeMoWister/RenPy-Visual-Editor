@@ -1,4 +1,4 @@
-<h1 align="center">Rigel - RenPy Visual Script Editor</h1>
+<h1 align="center">RenPy Visual Script Editor</h1>
 
 <p align="center">
   Визуальный редактор сценариев для <strong>Ren'Py</strong>, позволяющий создавать <code>.rpy</code>-файлы без ручного написания кода.
