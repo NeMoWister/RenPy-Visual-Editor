@@ -1,4 +1,4 @@
-<h1 align="center">RenPy Visual Script Editor</h1>
+<h1 align="center">Rigel - RenPy Visual Script Editor</h1>
 
 <p align="center">
   A <strong>visual node-based script editor</strong> for Ren'Py that lets you create <code>.rpy</code> scenarios without writing code by hand.
