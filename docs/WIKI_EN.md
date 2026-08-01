@@ -27,7 +27,8 @@
 10. [Generation & export](#10-generation--export)
 11. [Hotkeys](#11-hotkeys)
 12. [FAQ](#12-faq)
-13. [Version history](#13-version-history)
+13. [How it works: features by version](#13-how-it-works-features-by-version)
+14. [Version history](#14-version-history)
 
 ---
 
@@ -319,7 +320,158 @@ A: If `X` isn't found in resources, the code is preserved verbatim. Make sure th
 
 ---
 
-## 13. Version history 📜
+## 13. How it works: features by version 🧭
+
+### v1.4.0
+
+- **Choice menus with nested node support** - a menu option can now have
+  its own embedded chain of nodes right inside it (not just a jump to a
+  separate label): the scene continues inside the option, and once it
+  ends, the editor automatically returns to the main flow.
+- **"Where used" viewer** - for any resource (background, CG, sprite,
+  music, sound) you can see the full list of places it's used across the
+  whole project, including nodes nested inside menu branches, with a jump
+  straight to the specific node.
+- **Built-in audio player with waveform visualization** - music/sound/
+  ambience fields render a waveform (via `ffmpeg`, if it's on `PATH`),
+  making it easy to place fadein/fadeout points by eye and seek by
+  clicking the wave. If `ffmpeg` isn't found, the wave simply isn't drawn -
+  playback and seeking still work normally.
+- **Presentation mode: start from any node, rewind, breadcrumbs** - you can
+  start a run from a chosen node instead of the very beginning (the editor
+  computes the scene state up to that point); you can also step back to the
+  previous line, and breadcrumbs of visited labels help navigate
+  non-linear scripts.
+- **Script timing analysis** - estimates reading duration per line/scene/
+  character without actually running the presentation. It follows
+  `jump`/`label` rather than strict node order (otherwise the estimate
+  would be meaningless for non-linear scripts); to avoid hanging on
+  day-loop-style cycles, revisits of the same label are capped, and the
+  estimate is flagged as incomplete if the cap is hit.
+- **Per-line merge helper on export** - if the target `.rpy` already exists
+  and was hand-edited outside the editor, a diff is shown before
+  overwriting. Individual non-overlapping chunks (hunks) can be accepted
+  (take the generated version) or rejected (keep what's on disk)
+  one by one, instead of all-or-nothing.
+- **Multi-file export (one `.rpy` per chapter)** - the script can be split
+  into several `.rpy` files: one per editor scene, one per top-level
+  `label` (closest to a chapter/act split), or a fixed number of scenes per
+  file. Loaded together by Ren'Py, all files behave as a single
+  script - `jump`/`call` across files keep working.
+- **Smart import (matching existing resources)** - when importing a
+  third-party `.rpy`, the editor recognizes declarations like
+  `image bg beach = "bg/beach.png"`, `define audio.click = "sfx/click.ogg"`,
+  `music_list = {...}` and reuses already-known names instead of creating
+  duplicates.
+- **Import characters with auto-detected colors** - importing
+  `Character("Alice", color="#ff9966")` picks up the dialogue color
+  straight from the declaration, no manual recoloring needed.
+- **Spell checking** - highlights likely typos in dialogue lines (Russian
+  is checked via pymorphy3 morphological analysis, English via the
+  pyspellchecker dictionary), plus technical checks: unclosed
+  `{b}`/`{i}`/`{color}` tags, repeated words, stray spaces and punctuation.
+- **Command palette (Ctrl+Shift+P)** - quickly search and run any menu
+  action by name, like in VSCode/Sublime. The command list is built
+  automatically from the window's menus, so there's no separate registry
+  that could drift out of sync with the actual menu items.
+- **NVL / ADV mode support** - switch between classic ADV (a single line in
+  a bottom window, no accumulation) and NVL (lines stack in a full-screen
+  column) - works the same way both in the scene preview and in
+  presentation mode.
+
+### v1.3.0
+
+- **Collapsible node groups** - adjacent nodes can be combined into a
+  named, colored group on the scene graph and collapsed into a single row,
+  so you don't have to scroll through a long scene in full.
+- **Copy / paste nodes and chains** - not just a single node, but a whole
+  sequence of consecutive nodes can be copied in order and pasted
+  elsewhere in the scene or in another scene.
+- **Node search with jump-to-result** - search dialogue text and node
+  parameters across the whole project, jumping straight to the matching
+  node in the right scene.
+- **Color-coded node markers** - any node can get a colored marker for
+  visual navigation on the scene graph (e.g. highlighting key story
+  beats).
+- **Undo / redo** - built on snapshots of the entire project's state
+  rather than per-field patches, so it works reliably for any kind of
+  change - from a text edit to restructuring scenes.
+- **Dialogue counter per character** - counts lines, words, and characters
+  per speaking character (plus narration with no character) to gauge
+  dialogue balance across the script.
+- **Mass text replacement** - find and replace text across all dialogue
+  lines, menu prompts, and menu options in the whole project (as opposed
+  to the targeted replacement only available during `.rpy` import), with a
+  preview of matches before applying.
+- **Favorites / recently used resources** - a resource in the carousel can
+  be starred as a favorite for quick access instead of digging through
+  folders every time.
+- **Export to plain text & import corrections** - the script can be
+  exported as a simple text "screenplay" file (`Name: Line text` plus a
+  hidden anchor tying each line back to its node) for proofreading by a
+  writer or editor without the app itself; the corrected text is then
+  imported back and matched to the same nodes - scene structure and node
+  types aren't touched.
+- **Custom node templates** - you can define your own node type (e.g. "New
+  chapter") with its own parameters (string/number/bool) and a Jinja2 code
+  template - it then looks and behaves like a built-in node type in both
+  the node-type list and the scene graph.
+- **Presentation mode (beta)** - the first version of running the script
+  without exporting to Ren'Py, later extended in v1.4.0 with rewind and
+  breadcrumbs.
+- **Auto-save & crash recovery** - the project state is periodically (every
+  N seconds, if there are unsaved changes) written entirely to a dedicated
+  recovery slot; if the editor previously closed unexpectedly, the next
+  launch offers to restore the unsaved changes.
+- **Drag-n-drop resources into the carousel** - new files can be dragged
+  straight into the resource carousel window instead of copying them into
+  the `resources/` folder manually and pressing F5.
+- **In-app versioning (snapshots)** - the same undo/redo mechanism,
+  presented as a dedicated history panel: a labeled list of recent actions
+  you can roll back to in one click, instead of pressing Ctrl+Z many times
+  in a row.
+
+### v1.2.0
+
+- **Character name recoloring from settings** - a character's dialogue
+  color is changed in one central place, without editing every line
+  individually.
+- **Updated UI design** - a visual refresh with no change in behavior.
+
+### v1.1.0
+
+- **Dialogue length hint (200/340 chars)** - a character counter under the
+  text field shows soft length guidelines (standard on-screen readability
+  thresholds), so lines don't overflow the in-game dialogue window.
+- **In-editor music & sound playback** - a selected track or sound effect
+  can be previewed right in the node field, without launching the game.
+- **Tags for BG and CG** - resources can be tagged and grouped by tag in
+  the carousel (see section 6).
+- **`.rpy` script import** - the first version of importing an existing
+  Ren'Py script into an editor project.
+- **Nodes: scene, stop music, window show/hide** - dedicated node types for
+  these actions (the node type set was smaller before this).
+
+### v1.0.0
+
+- **Core visual node editor** - the foundation everything else builds on.
+- **Sprite subfolders (normal/far/close)** - a character's folder structure
+  by shot distance.
+- **Composite sprite support (`sprites.rpy`)** - recognizing
+  `ConditionSwitch`/`im.Composite` declarations (see section 4).
+- **`default/` and `custom/` folders** - two resource sources (see
+  section 3).
+- **Automatic resource naming** - generating names from the file path (see
+  section 3).
+- **Live scene preview** - the preview panel on the right (see section 7).
+- **Transition handling (dissolve, dspr, etc.)** - the built-in set of
+  transitions (see section 5).
+- **Choice menu with jump/call** - the basic menu node (see section 5).
+- **User guide** - this very Wiki.
+
+---
+
+## 14. Version history 📜
 
 ### v1.4.0
 - Choice menus with nested node support
