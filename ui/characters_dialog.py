@@ -10,11 +10,12 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtGui import QColor
 from core.models import Character
+from core.i18n import tr
 
 
 class CharacterEditWidget(QGroupBox):
     def __init__(self):
-        super().__init__("Персонаж")
+        super().__init__(tr("characters.group_title"))
         layout = QVBoxLayout(self)
         def row(label, widget):
             r = QHBoxLayout()
@@ -23,10 +24,10 @@ class CharacterEditWidget(QGroupBox):
             return r
         self.name_edit = QLineEdit(); self.name_edit.setPlaceholderText("Алеся")
         self.var_edit = QLineEdit(); self.var_edit.setPlaceholderText("alesya")
-        layout.addLayout(row("Имя:", self.name_edit))
-        layout.addLayout(row("Переменная:", self.var_edit))
+        layout.addLayout(row(tr("characters.name_label"), self.name_edit))
+        layout.addLayout(row(tr("characters.variable_label"), self.var_edit))
         color_row = QHBoxLayout()
-        color_row.addWidget(QLabel("Цвет:"))
+        color_row.addWidget(QLabel(tr("characters.color_label")))
         self.color_btn = QPushButton("#ffffff")
         self.color_btn.setFixedWidth(90)
         self._color = "#ffffff"
@@ -35,8 +36,8 @@ class CharacterEditWidget(QGroupBox):
         color_row.addWidget(self.color_btn)
         color_row.addStretch()
         layout.addLayout(color_row)
-        self.tag_edit = QLineEdit(); self.tag_edit.setPlaceholderText("Необязательно")
-        layout.addLayout(row("Image tag:", self.tag_edit))
+        self.tag_edit = QLineEdit(); self.tag_edit.setPlaceholderText(tr("characters.image_tag_placeholder"))
+        layout.addLayout(row(tr("characters.image_tag_label"), self.tag_edit))
         self.name_edit.textChanged.connect(self._auto_var)
 
     def _auto_var(self, text):
@@ -80,7 +81,7 @@ class CharactersDialog(QDialog):
 
     def __init__(self, characters: list, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Персонажи")
+        self.setWindowTitle(tr("characters.title"))
         self.setMinimumSize(600, 400)
         import copy
         self.characters = copy.deepcopy(characters)
@@ -90,14 +91,14 @@ class CharactersDialog(QDialog):
     def _setup_ui(self):
         layout = QHBoxLayout(self)
         left = QVBoxLayout()
-        left.addWidget(QLabel("Список персонажей:"))
+        left.addWidget(QLabel(tr("characters.list_label")))
         self.char_list = QListWidget()
         self.char_list.currentRowChanged.connect(self._on_select)
         left.addWidget(self.char_list)
         btn_row = QHBoxLayout()
-        self.btn_add = QPushButton("+ Добавить")
+        self.btn_add = QPushButton(tr("characters.add"))
         self.btn_add.clicked.connect(self._add_char)
-        self.btn_del = QPushButton("✕ Удалить")
+        self.btn_del = QPushButton(tr("characters.delete"))
         self.btn_del.setObjectName("btn_danger")
         self.btn_del.clicked.connect(self._del_char)
         btn_row.addWidget(self.btn_add)
@@ -105,19 +106,18 @@ class CharactersDialog(QDialog):
         left.addLayout(btn_row)
 
         io_row = QHBoxLayout()
-        self.btn_export = QPushButton("⬆ Экспорт...")
-        self.btn_export.setToolTip("Сохранить список персонажей в отдельный JSON-файл, "
-                                    "чтобы перенести в другой проект или сделать резервную копию.")
+        self.btn_export = QPushButton(tr("characters.export"))
+        self.btn_export.setToolTip(tr("characters.export_tooltip"))
         self.btn_export.clicked.connect(self._export_characters)
-        self.btn_import = QPushButton("⬇ Импорт...")
-        self.btn_import.setToolTip("Загрузить персонажей из файла, ранее сохранённого через «Экспорт».")
+        self.btn_import = QPushButton(tr("characters.import"))
+        self.btn_import.setToolTip(tr("characters.import_tooltip"))
         self.btn_import.clicked.connect(self._import_characters)
         io_row.addWidget(self.btn_export)
         io_row.addWidget(self.btn_import)
         left.addLayout(io_row)
 
-        self.btn_reset = QPushButton("🗑 Сбросить список")
-        self.btn_reset.setToolTip("Удалить ВСЕХ персонажей из текущего проекта.")
+        self.btn_reset = QPushButton(tr("characters.reset_list"))
+        self.btn_reset.setToolTip(tr("characters.reset_tooltip"))
         self.btn_reset.setObjectName("btn_secondary")
         self.btn_reset.clicked.connect(self._reset_characters)
         left.addWidget(self.btn_reset)
@@ -127,7 +127,7 @@ class CharactersDialog(QDialog):
         right = QVBoxLayout()
         self.editor = CharacterEditWidget()
         right.addWidget(self.editor)
-        self.btn_save_char = QPushButton("💾 Применить")
+        self.btn_save_char = QPushButton(tr("characters.apply"))
         self.btn_save_char.clicked.connect(self._save_char)
         right.addWidget(self.btn_save_char)
         right.addStretch()
@@ -147,7 +147,7 @@ class CharactersDialog(QDialog):
             self.editor.load(self.characters[row])
 
     def _add_char(self):
-        self.characters.append(Character(name="Новый", variable="new_char"))
+        self.characters.append(Character(name=tr("characters.new_name"), variable="new_char"))
         self._rebuild_list()
         self.char_list.setCurrentRow(len(self.characters)-1)
 
@@ -159,11 +159,11 @@ class CharactersDialog(QDialog):
 
     def _export_characters(self):
         if not self.characters:
-            QMessageBox.information(self, "Нечего экспортировать", "Список персонажей пуст.")
+            QMessageBox.information(self, tr("characters.nothing_to_export_title"), tr("characters.list_empty"))
             return
         path, _ = QFileDialog.getSaveFileName(
-            self, "Экспорт персонажей", "characters.json",
-            "JSON (*.json);;Все файлы (*)"
+            self, tr("characters.export_title"), "characters.json",
+            f"JSON (*.json);;{tr('characters.all_files')} (*)"
         )
         if not path:
             return
@@ -171,24 +171,22 @@ class CharactersDialog(QDialog):
             data = {"characters": [asdict(ch) for ch in self.characters]}
             with open(path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
-            QMessageBox.information(self, "Готово",
-                                     f"Экспортировано {len(self.characters)} персонажей в:\n{path}")
+            QMessageBox.information(self, tr("characters.done_title"),
+                                     tr("characters.exported_text", count=len(self.characters), path=path))
         except Exception as e:
-            QMessageBox.critical(self, "Ошибка экспорта", str(e))
+            QMessageBox.critical(self, tr("characters.export_error_title"), str(e))
 
     def _import_characters(self):
         path, _ = QFileDialog.getOpenFileName(
-            self, "Импорт персонажей", "",
-            "JSON (*.json);;Все файлы (*)"
+            self, tr("characters.import_title"), "",
+            f"JSON (*.json);;{tr('characters.all_files')} (*)"
         )
         if not path:
             return
 
         reply = QMessageBox.question(
-            self, "Как объединить?",
-            "Добавить импортированных персонажей к текущим "
-            "(совпадающие по переменной будут перезаписаны)?\n\n"
-            "Да - добавить/обновить.\nНет - полностью заменить текущий список.",
+            self, tr("characters.merge_title"),
+            tr("characters.merge_text"),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel
         )
         if reply == QMessageBox.StandardButton.Cancel:
@@ -200,7 +198,7 @@ class CharactersDialog(QDialog):
                 data = json.load(f)
             imported = [Character(**c) for c in data.get("characters", [])]
             if not imported:
-                QMessageBox.warning(self, "Пустой файл", "В файле не найдено персонажей.")
+                QMessageBox.warning(self, tr("characters.empty_file_title"), tr("characters.empty_file_text"))
                 return
 
             if merge:
@@ -214,19 +212,17 @@ class CharactersDialog(QDialog):
             self._rebuild_list()
             if self.characters:
                 self.char_list.setCurrentRow(0)
-            QMessageBox.information(self, "Готово", f"Импортировано {len(imported)} персонажей.")
+            QMessageBox.information(self, tr("characters.done_title"), tr("characters.imported_text", count=len(imported)))
         except Exception as e:
-            QMessageBox.critical(self, "Ошибка импорта", str(e))
+            QMessageBox.critical(self, tr("characters.import_error_title"), str(e))
 
     def _reset_characters(self):
         if not self.characters:
-            QMessageBox.information(self, "Нечего сбрасывать", "Список персонажей уже пуст.")
+            QMessageBox.information(self, tr("characters.nothing_to_reset_title"), tr("characters.list_already_empty"))
             return
         reply = QMessageBox.question(
-            self, "Сбросить список персонажей?",
-            f"Удалить всех {len(self.characters)} персонажей из проекта? "
-            "Узлы диалогов, ссылающиеся на них, останутся, но без привязки к персонажу.\n\n"
-            "Это действие нельзя отменить.",
+            self, tr("characters.reset_confirm_title"),
+            tr("characters.reset_confirm_text", count=len(self.characters)),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
@@ -234,14 +230,14 @@ class CharactersDialog(QDialog):
             return
         self.characters = []
         self._rebuild_list()
-        QMessageBox.information(self, "Готово", "Список персонажей сброшен.")
+        QMessageBox.information(self, tr("characters.done_title"), tr("characters.reset_done_text"))
 
     def _save_char(self):
         row = self.char_list.currentRow()
         if 0 <= row < len(self.characters):
             ch = self.editor.get_character()
             if not ch.name or not ch.variable:
-                QMessageBox.warning(self, "Ошибка", "Имя и переменная обязательны")
+                QMessageBox.warning(self, tr("characters.error_title"), tr("characters.name_var_required"))
                 return
             self.characters[row] = ch
             self._rebuild_list()

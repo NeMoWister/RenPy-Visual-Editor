@@ -149,7 +149,7 @@ class CodeTemplateStore:
         return node_type_key in self.templates
 
     def has_any_customizations(self) -> bool:
-        return bool(self.templates) or self.indent_unit != "spaces" or self.indent_width != 4 \
+        return bool(self.templates) or self.indent_unit != "spaces" or self.indent_width != 4\
             or self.comment_prefix != "#"
 
     def render(self, node_type_key: str, context: dict) -> Optional[str]:

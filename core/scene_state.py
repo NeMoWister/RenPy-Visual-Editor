@@ -18,6 +18,7 @@ class ActiveSprite:
     tag: str
     group_path: str = ""                                                                                     
     composite: Optional[CompositeSprite] = None                                                       
+    atl_script: str = ""                                                            
 
     def top_group(self) -> str:
         """Имя персонажа: для составного спрайта - CompositeSprite.character,
@@ -35,6 +36,7 @@ class SceneState:
     char_var: Optional[str] = None
     text: str = ""
     nvl_mode: bool = False
+    bg_atl_script: str = ""                                                              
 
     def sprite_list(self) -> List[ActiveSprite]:
         return list(self.sprites.values())
@@ -85,13 +87,16 @@ def _apply_node(state: SceneState, node: SceneNode, is_current: bool, rm=None):
                                                                     
                                                              
         state.cg_var = None
+        state.bg_atl_script = node.atl_script or ""
                                                                          
         if t == NodeType.SCENE:
             state.sprites.clear()
     elif t == NodeType.SHOW_CG:
         state.cg_var = node.cg_var or None
+        state.bg_atl_script = node.atl_script or ""
     elif t == NodeType.HIDE_CG:
         state.cg_var = None
+        state.bg_atl_script = ""
     elif t == NodeType.SHOW_SPRITE:
         if node.sprite_var:
             tag, composite = _resolve_sprite_tag(node, rm)
@@ -111,6 +116,7 @@ def _apply_node(state: SceneState, node: SceneNode, is_current: bool, rm=None):
                 tag=tag,
                 group_path=group_path,
                 composite=composite,
+                atl_script=node.atl_script or "",
             )
     elif t == NodeType.HIDE_SPRITE:
         if node.hide_group:

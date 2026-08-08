@@ -50,6 +50,17 @@ def _sprite_tag(node: SceneNode, rm=None) -> str:
     return node.sprite_var or ""
 
 
+def _render_atl_lines(atl_script: str, pad: str) -> List[str]:
+    """Строки ATL-блока (см. core/atl.py), сохранённого дословно (с
+    относительным отступом внутри себя) в node.atl_script, с добавленным
+    текущим pad - вложенные block:-статементы сохраняют свой доп. отступ,
+    т.к. он уже есть в самой строке."""
+    lines = []
+    for line in atl_script.splitlines():
+        lines.append(f"{pad}{INDENT}{line}" if line.strip() else "")
+    return lines
+
+
 def _render_sprite_show_lines(node: SceneNode, pad: str) -> List[str]:
     """Строки show-блока одного спрайта БЕЗ завершающего with - он добавляется
     отдельно вызывающей стороной (см. _render_sprite_group), чтобы несколько
@@ -58,8 +69,11 @@ def _render_sprite_show_lines(node: SceneNode, pad: str) -> List[str]:
     if not spr:
         return []
     expr = f" {node.sprite_expression}" if node.sprite_expression else ""
-    pos = node.sprite_position
     lines = [f"{pad}show {spr}{expr}:"]
+    if node.atl_script and node.atl_script.strip():
+        lines.extend(_render_atl_lines(node.atl_script, pad))
+        return lines
+    pos = node.sprite_position
     lines.append(f"{pad}{INDENT}xalign {pos.xalign:.2f}")
     lines.append(f"{pad}{INDENT}yalign {pos.yalign:.2f}")
     if pos.zoom != 1.0:
@@ -95,11 +109,21 @@ def _render_node_no_transition(node: SceneNode, pad: str) -> List[str]:
     if t == NodeType.SHOW_SPRITE:
         return _render_sprite_show_lines(node, pad)
     if t == NodeType.SCENE:
-        return [f"{pad}scene {node.bg_var or 'black'}"]
+        bg = node.bg_var or "black"
+        if node.atl_script and node.atl_script.strip():
+            return [f"{pad}scene {bg}:"] + _render_atl_lines(node.atl_script, pad)
+        return [f"{pad}scene {bg}"]
     if t == NodeType.SHOW_BG:
-        return [f"{pad}show {node.bg_var or 'black'}"]
+        bg = node.bg_var or "black"
+        if node.atl_script and node.atl_script.strip():
+            return [f"{pad}show {bg}:"] + _render_atl_lines(node.atl_script, pad)
+        return [f"{pad}show {bg}"]
     if t == NodeType.SHOW_CG:
-        return [f"{pad}show {node.cg_var}"] if node.cg_var else []
+        if not node.cg_var:
+            return []
+        if node.atl_script and node.atl_script.strip():
+            return [f"{pad}show {node.cg_var}:"] + _render_atl_lines(node.atl_script, pad)
+        return [f"{pad}show {node.cg_var}"]
     if t == NodeType.WINDOW:
         return [f"{pad}window {node.window_action}"]
     return []
@@ -148,18 +172,34 @@ def generate_node(node: SceneNode, indent: int = 1, active_sprites: Optional[Dic
         lines.append(f"label {node.label_name}:")
     elif t == NodeType.SCENE:
         bg = node.bg_var or "black"
-        if node.transition:
+        if node.atl_script and node.atl_script.strip():
+            lines.append(f"{pad}scene {bg}:")
+            lines.extend(_render_atl_lines(node.atl_script, pad))
+            if node.transition:
+                lines.append(f"{pad}with {node.transition}")
+        elif node.transition:
             lines.append(f"{pad}scene {bg} with {node.transition}")
         else:
             lines.append(f"{pad}scene {bg}")
     elif t == NodeType.SHOW_BG:
-        if node.transition:
-            lines.append(f"{pad}show {node.bg_var or 'black'} with {node.transition}")
+        bg = node.bg_var or "black"
+        if node.atl_script and node.atl_script.strip():
+            lines.append(f"{pad}show {bg}:")
+            lines.extend(_render_atl_lines(node.atl_script, pad))
+            if node.transition:
+                lines.append(f"{pad}with {node.transition}")
+        elif node.transition:
+            lines.append(f"{pad}show {bg} with {node.transition}")
         else:
-            lines.append(f"{pad}show {node.bg_var or 'black'}")
+            lines.append(f"{pad}show {bg}")
     elif t == NodeType.SHOW_CG:
         if node.cg_var:
-            if node.transition:
+            if node.atl_script and node.atl_script.strip():
+                lines.append(f"{pad}show {node.cg_var}:")
+                lines.extend(_render_atl_lines(node.atl_script, pad))
+                if node.transition:
+                    lines.append(f"{pad}with {node.transition}")
+            elif node.transition:
                 lines.append(f"{pad}show {node.cg_var} with {node.transition}")
             else:
                 lines.append(f"{pad}show {node.cg_var}")
@@ -424,30 +464,40 @@ def _project_uses_nvl(project: Project) -> bool:
 
 
 def generate_full_script(project: Project, rm=None, custom_templates: Optional[CustomNodeTemplateStore] = None,
-                          nvl_style: str = "character") -> str:
+                          nvl_style: str = "character", include_defines: bool = True) -> str:
     lines = [
         f"{COMMENT_PREFIX} Сценарий: {project.title}",
         f"{COMMENT_PREFIX} Сгенерировано RenPy Visual Editor",
         "",
     ]
-    if project.characters:
-        lines.append(f"{COMMENT_PREFIX} ===== Персонажи =====")
-        for ch in project.characters:
-            lines.append(ch.to_renpy())
-        lines.append("")
+    if include_defines:
+        if project.characters:
+            lines.append(f"{COMMENT_PREFIX} ===== Персонажи =====")
+            for ch in project.characters:
+                lines.append(ch.to_renpy())
+            lines.append("")
 
-    uses_nvl = _project_uses_nvl(project)
-    if uses_nvl and project.characters and nvl_style == "character":
-        lines.append(f"{COMMENT_PREFIX} ===== NVL-варианты персонажей (для NVL_MODE-нод) =====")
-        for ch in project.characters:
-            lines.append(ch.to_renpy_nvl())
-        lines.append("")
-    if uses_nvl and nvl_style == "function":
-        lines.append(
-            f"{COMMENT_PREFIX} NVL/ADV переключаются через $ set_mode_nvl() / $ set_mode_adv() -"
-        )
-        lines.append(f"{COMMENT_PREFIX} эти функции нужно определить самостоятельно (см. настройки редактора).")
-        lines.append("")
+        if rm is not None:
+            from core.custom_transitions import load_custom_transitions
+            custom = load_custom_transitions(getattr(rm, 'base_dir', None))
+            if custom:
+                lines.append(f"{COMMENT_PREFIX} ===== Кастомные переходы (заданы через диалог перехода) =====")
+                for name, expr in sorted(custom.items()):
+                    lines.append(f"define {name} = {expr}")
+                lines.append("")
+
+        uses_nvl = _project_uses_nvl(project)
+        if uses_nvl and project.characters and nvl_style == "character":
+            lines.append(f"{COMMENT_PREFIX} ===== NVL-варианты персонажей (для NVL_MODE-нод) =====")
+            for ch in project.characters:
+                lines.append(ch.to_renpy_nvl())
+            lines.append("")
+        if uses_nvl and nvl_style == "function":
+            lines.append(
+                f"{COMMENT_PREFIX} NVL/ADV переключаются через $ set_mode_nvl() / $ set_mode_adv() -"
+            )
+            lines.append(f"{COMMENT_PREFIX} эти функции нужно определить самостоятельно (см. настройки редактора).")
+            lines.append("")
 
     lines.append(f"label {project.label_name}:")
     lines.append("")
@@ -474,9 +524,31 @@ def generate_full_script(project: Project, rm=None, custom_templates: Optional[C
     return "\n".join(lines)
 
 
-def generate_defines_only(project: Project) -> str:
-    lines = ["# ===== Персонажи ====="]
+def generate_defines_only(project: Project, nvl_style: str = "character", rm=None) -> str:
+    lines = [f"{COMMENT_PREFIX} ===== Персонажи ====="]
     for ch in project.characters:
         lines.append(ch.to_renpy())
     lines.append("")
+
+    if rm is not None:
+        from core.custom_transitions import load_custom_transitions
+        custom = load_custom_transitions(getattr(rm, 'base_dir', None))
+        if custom:
+            lines.append(f"{COMMENT_PREFIX} ===== Кастомные переходы (заданы через диалог перехода) =====")
+            for name, expr in sorted(custom.items()):
+                lines.append(f"define {name} = {expr}")
+            lines.append("")
+
+    uses_nvl = _project_uses_nvl(project)
+    if uses_nvl and project.characters and nvl_style == "character":
+        lines.append(f"{COMMENT_PREFIX} ===== NVL-варианты персонажей (для NVL_MODE-нод) =====")
+        for ch in project.characters:
+            lines.append(ch.to_renpy_nvl())
+        lines.append("")
+    if uses_nvl and nvl_style == "function":
+        lines.append(
+            f"{COMMENT_PREFIX} NVL/ADV переключаются через $ set_mode_nvl() / $ set_mode_adv() -"
+        )
+        lines.append(f"{COMMENT_PREFIX} эти функции нужно определить самостоятельно (см. настройки редактора).")
+        lines.append("")
     return "\n".join(lines)

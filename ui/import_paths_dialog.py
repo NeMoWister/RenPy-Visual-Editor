@@ -18,6 +18,7 @@ from core.rpy_path_import import (
     parse_image_and_define_paths, parse_characters, parse_music_list,
     build_import_report, apply_import_report, ImportReport,
 )
+from core.i18n import tr
 
 
 class ImportPathsDialog(QDialog):
@@ -28,38 +29,31 @@ class ImportPathsDialog(QDialog):
         super().__init__(parent)
         self.rm = resource_manager
         self.report: ImportReport = ImportReport()
-        self.setWindowTitle("Импорт путей из .rpy")
+        self.setWindowTitle(tr("import_paths.title"))
         self.setMinimumSize(820, 560)
         self._setup_ui()
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
 
-        hint = QLabel(
-            "Выберите один или несколько .rpy файлов существующего проекта Ren'Py "
-            "(например, определения ресурсов или весь сценарий). Редактор найдёт "
-            "там простые присвоения вида image/define = \"путь\", определения "
-            "персонажей Character(...) и словарь music_list, сопоставит пути с "
-            "файлами в resources/ и предложит переименовать переменные ресурсов "
-            "так, как они уже названы в вашем проекте."
-        )
+        hint = QLabel(tr("import_paths.hint"))
         hint.setWordWrap(True)
-        hint.setStyleSheet("color:#999; font-size:11px;")
+        hint.setObjectName("hint_text")
         layout.addWidget(hint)
 
         btn_row = QHBoxLayout()
-        btn_files = QPushButton("📄 Выбрать .rpy файлы...")
+        btn_files = QPushButton(tr("import_paths.pick_files"))
         btn_files.clicked.connect(self._pick_files)
         btn_row.addWidget(btn_files)
-        btn_folder = QPushButton("📁 Выбрать папку (рекурсивно)...")
+        btn_folder = QPushButton(tr("import_paths.pick_folder"))
         btn_folder.setObjectName("btn_secondary")
         btn_folder.clicked.connect(self._pick_folder)
         btn_row.addWidget(btn_folder)
         btn_row.addStretch()
         layout.addLayout(btn_row)
 
-        self.status_lbl = QLabel("Файлы не выбраны.")
-        self.status_lbl.setStyleSheet("color:#888; font-size:11px;")
+        self.status_lbl = QLabel(tr("import_paths.no_files"))
+        self.status_lbl.setObjectName("hint_text")
         layout.addWidget(self.status_lbl)
 
         self.tabs = QTabWidget()
@@ -67,32 +61,34 @@ class ImportPathsDialog(QDialog):
 
         self.plan_table = QTableWidget()
         self.plan_table.setColumnCount(6)
-        self.plan_table.setHorizontalHeaderLabels(
-            ["✓", "Категория", "Путь", "Было", "Будет", "Строка"])
+        self.plan_table.setHorizontalHeaderLabels([
+            tr("import_paths.col_check"), tr("import_paths.col_category"), tr("import_paths.col_path"),
+            tr("import_paths.col_old"), tr("import_paths.col_new"), tr("import_paths.col_line"),
+        ])
         self.plan_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
         self.plan_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
         self.plan_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
-        self.tabs.addTab(self.plan_table, "Переименования (0)")
+        self.tabs.addTab(self.plan_table, tr("import_paths.tab_renames", count=0))
 
         self.unmatched_table = QTableWidget()
         self.unmatched_table.setColumnCount(3)
-        self.unmatched_table.setHorizontalHeaderLabels(["Имя в .rpy", "Путь", "Строка"])
+        self.unmatched_table.setHorizontalHeaderLabels([tr("import_paths.col_rpy_name"), tr("import_paths.col_path"), tr("import_paths.col_line")])
         self.unmatched_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        self.tabs.addTab(self.unmatched_table, "Не найдено на диске (0)")
+        self.tabs.addTab(self.unmatched_table, tr("import_paths.tab_unmatched", count=0))
 
         self.chars_table = QTableWidget()
         self.chars_table.setColumnCount(4)
-        self.chars_table.setHorizontalHeaderLabels(["✓", "Переменная", "Имя", "Цвет"])
+        self.chars_table.setHorizontalHeaderLabels([tr("import_paths.col_check"), tr("import_paths.col_variable"), tr("import_paths.col_name"), tr("import_paths.col_color")])
         self.chars_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-        self.tabs.addTab(self.chars_table, "Персонажи (0)")
+        self.tabs.addTab(self.chars_table, tr("import_paths.tab_characters", count=0))
 
         btn_bottom = QHBoxLayout()
-        btn_cancel = QPushButton("Закрыть")
+        btn_cancel = QPushButton(tr("import_paths.close"))
         btn_cancel.setObjectName("btn_secondary")
         btn_cancel.clicked.connect(self.reject)
         btn_bottom.addWidget(btn_cancel)
         btn_bottom.addStretch()
-        self.btn_apply = QPushButton("✓ Применить отмеченное")
+        self.btn_apply = QPushButton(tr("import_paths.apply_checked"))
         self.btn_apply.setEnabled(False)
         self.btn_apply.clicked.connect(self._apply)
         btn_bottom.addWidget(self.btn_apply)
@@ -101,12 +97,12 @@ class ImportPathsDialog(QDialog):
                                                                           
 
     def _pick_files(self):
-        paths, _ = QFileDialog.getOpenFileNames(self, "Выберите .rpy файлы", "", "Ren'Py script (*.rpy)")
+        paths, _ = QFileDialog.getOpenFileNames(self, tr("import_paths.pick_files_title"), "", "Ren'Py script (*.rpy)")
         if paths:
             self._process_files(paths)
 
     def _pick_folder(self):
-        folder = QFileDialog.getExistingDirectory(self, "Выберите папку с .rpy файлами")
+        folder = QFileDialog.getExistingDirectory(self, tr("import_paths.pick_folder_title"))
         if not folder:
             return
         found = []
@@ -115,7 +111,7 @@ class ImportPathsDialog(QDialog):
                 if fn.lower().endswith('.rpy'):
                     found.append(os.path.join(dirpath, fn))
         if not found:
-            QMessageBox.information(self, "Импорт путей", "В выбранной папке не найдено .rpy файлов.")
+            QMessageBox.information(self, tr("import_paths.dialog_title"), tr("import_paths.no_rpy_found"))
             return
         self._process_files(found)
 
@@ -137,9 +133,9 @@ class ImportPathsDialog(QDialog):
         self.report = build_import_report(self.rm, all_path_defs, all_characters, all_music)
         self._fill_tables()
 
-        status = f"Обработано файлов: {len(paths)}. Найдено переименований: {len(self.report.plan)}."
+        status = tr("import_paths.status", files=len(paths), renames=len(self.report.plan))
         if read_errors:
-            status += f" Ошибки чтения: {len(read_errors)}."
+            status += tr("import_paths.read_errors", count=len(read_errors))
         self.status_lbl.setText(status)
         self.btn_apply.setEnabled(bool(self.report.plan) or bool(self.report.characters))
 
@@ -158,7 +154,7 @@ class ImportPathsDialog(QDialog):
                 cell = QTableWidgetItem(text)
                 cell.setFlags(Qt.ItemFlag.ItemIsEnabled)
                 self.plan_table.setItem(row, col, cell)
-        self.tabs.setTabText(0, f"Переименования ({len(self.report.plan)})")
+        self.tabs.setTabText(0, tr("import_paths.tab_renames", count=len(self.report.plan)))
 
         self.unmatched_table.setRowCount(0)
         for pd in self.report.unmatched:
@@ -169,7 +165,7 @@ class ImportPathsDialog(QDialog):
                 cell.setFlags(Qt.ItemFlag.ItemIsEnabled)
                 cell.setForeground(Qt.GlobalColor.gray)
                 self.unmatched_table.setItem(row, col, cell)
-        self.tabs.setTabText(1, f"Не найдено на диске ({len(self.report.unmatched)})")
+        self.tabs.setTabText(1, tr("import_paths.tab_unmatched", count=len(self.report.unmatched)))
 
         self.chars_table.setRowCount(0)
         for ch in self.report.characters:
@@ -185,7 +181,7 @@ class ImportPathsDialog(QDialog):
                     cell.setForeground(Qt.GlobalColor.white)
                     cell.setBackground(QColor(ch.color))
                 self.chars_table.setItem(row, col, cell)
-        self.tabs.setTabText(2, f"Персонажи ({len(self.report.characters)})")
+        self.tabs.setTabText(2, tr("import_paths.tab_characters", count=len(self.report.characters)))
 
                                                                           
 
@@ -204,8 +200,7 @@ class ImportPathsDialog(QDialog):
             self.paths_applied.emit()
 
         QMessageBox.information(
-            self, "Импорт путей",
-            f"Применено переименований: {applied_paths}.\n"
-            f"Импортировано персонажей: {len(selected_chars)}."
+            self, tr("import_paths.dialog_title"),
+            tr("import_paths.applied_result", renames=applied_paths, chars=len(selected_chars))
         )
         self.accept()

@@ -5,6 +5,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 
 from core.timing_estimator import TimingStats
+from core.i18n import tr
 
 
 def _fmt_seconds(s: float) -> str:
@@ -12,10 +13,10 @@ def _fmt_seconds(s: float) -> str:
     m, sec = divmod(s, 60)
     h, m = divmod(m, 60)
     if h:
-        return f"{h}ч {m:02d}м {sec:02d}с"
+        return tr("timing.unit_hms", h=h, m=m, s=sec)
     if m:
-        return f"{m}м {sec:02d}с"
-    return f"{sec}с"
+        return tr("timing.unit_ms", m=m, s=sec)
+    return tr("timing.unit_s", s=sec)
 
 
 class TimingReportDialog(QDialog):
@@ -24,41 +25,35 @@ class TimingReportDialog(QDialog):
 
     def __init__(self, stats: TimingStats, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Проверка тайминга")
+        self.setWindowTitle(tr("timing.title"))
         self.setMinimumSize(620, 560)
         layout = QVBoxLayout(self)
 
         if stats.truncated:
             warn = QLabel(f"⚠ {stats.truncation_reason}")
             warn.setWordWrap(True)
-            warn.setStyleSheet("color:#ffb020; font-weight:bold;")
+            warn.setObjectName("warning_hint")
             layout.addWidget(warn)
 
         summary = QLabel(
-            f"Реплик: <b>{stats.total_lines}</b> &nbsp;·&nbsp; "
-            f"Итого по прикидке: <b>{_fmt_seconds(stats.total_seconds)}</b> &nbsp;·&nbsp; "
-            f"В среднем на реплику: <b>{stats.average_seconds_per_line:.1f}с</b>"
+            tr("timing.summary", lines=stats.total_lines,
+               total=_fmt_seconds(stats.total_seconds),
+               avg=stats.average_seconds_per_line)
         )
         summary.setTextFormat(Qt.TextFormat.RichText)
         summary.setStyleSheet("font-size:13px; padding:4px 0;")
         layout.addWidget(summary)
 
-        note = QLabel(
-            "Оценка приблизительная: время реплики считается по длине текста "
-            "(≈22 симв/сек чтения, от 1.2 до 6 сек на реплику), паузы - по "
-            "длительности pause-нод. В разветвлениях меню берётся один "
-            "представительный путь (первый вариант с вписанными нодами, иначе "
-            "первый вариант с переходом), а не все ветки сразу."
-        )
+        note = QLabel(tr("timing.note"))
         note.setWordWrap(True)
-        note.setStyleSheet("color:#888; font-size:11px;")
+        note.setObjectName("hint_text")
         layout.addWidget(note)
 
-        char_box = QGroupBox("По персонажам")
+        char_box = QGroupBox(tr("timing.by_character"))
         char_l = QVBoxLayout(char_box)
         char_table = QTableWidget()
         char_table.setColumnCount(3)
-        char_table.setHorizontalHeaderLabels(["Персонаж", "Реплик", "Время"])
+        char_table.setHorizontalHeaderLabels([tr("timing.col_character"), tr("timing.col_lines"), tr("timing.col_time")])
         char_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         rows = sorted(stats.per_character_seconds.items(), key=lambda kv: -kv[1])
         char_table.setRowCount(len(rows))
@@ -70,11 +65,11 @@ class TimingReportDialog(QDialog):
         char_l.addWidget(char_table)
         layout.addWidget(char_box)
 
-        scene_box = QGroupBox("По сценам")
+        scene_box = QGroupBox(tr("timing.by_scene"))
         scene_l = QVBoxLayout(scene_box)
         scene_table = QTableWidget()
         scene_table.setColumnCount(2)
-        scene_table.setHorizontalHeaderLabels(["Сцена", "Время"])
+        scene_table.setHorizontalHeaderLabels([tr("timing.col_scene"), tr("timing.col_time")])
         scene_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         srows = sorted(stats.per_scene_seconds.items(), key=lambda kv: -kv[1])
         scene_table.setRowCount(len(srows))
@@ -85,11 +80,11 @@ class TimingReportDialog(QDialog):
         scene_l.addWidget(scene_table)
         layout.addWidget(scene_box)
 
-        longest_box = QGroupBox("Самые длинные реплики")
+        longest_box = QGroupBox(tr("timing.longest_lines"))
         longest_l = QVBoxLayout(longest_box)
         longest_table = QTableWidget()
         longest_table.setColumnCount(3)
-        longest_table.setHorizontalHeaderLabels(["Персонаж", "Текст", "Время"])
+        longest_table.setHorizontalHeaderLabels([tr("timing.col_character"), tr("timing.col_text"), tr("timing.col_time")])
         longest_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         longest_table.setRowCount(len(stats.longest_lines))
         for r, (name, text, secs) in enumerate(stats.longest_lines):

@@ -12,6 +12,7 @@ from core.code_templates import (
     CodeTemplateStore, DEFAULT_TEMPLATES, TEMPLATE_VARS_HELP,
     NODE_TYPE_LABELS, JINJA2_AVAILABLE,
 )
+from core.i18n import tr
 
                                                            
 _SAMPLE_CONTEXT = {
@@ -43,7 +44,7 @@ class CodeTemplatesDialog(QDialog):
         super().__init__(parent)
         self.store = store
         self.base_dir = base_dir
-        self.setWindowTitle("Шаблоны генерации кода")
+        self.setWindowTitle(tr("code_templates.title"))
         self.setMinimumSize(760, 560)
         self._setup_ui()
         self._load_settings()
@@ -53,27 +54,24 @@ class CodeTemplatesDialog(QDialog):
         layout = QVBoxLayout(self)
 
         if not JINJA2_AVAILABLE:
-            warn = QLabel(
-                "⚠ Пакет jinja2 не установлен - кастомные шаблоны сохранятся, но "
-                "НЕ будут применяться при генерации кода, пока вы не установите его "
-                "(pip install jinja2). Без него используется стандартная генерация."
-            )
+            warn = QLabel(tr("code_templates.no_jinja2"))
             warn.setWordWrap(True)
-            warn.setStyleSheet("color:#ffb84d; background:#332a1a; padding:6px; border-radius:4px;")
+            warn.setObjectName("warning_banner")
+            warn.setStyleSheet("padding:6px;")
             layout.addWidget(warn)
 
         settings_row = QHBoxLayout()
-        settings_row.addWidget(QLabel("Отступ:"))
+        settings_row.addWidget(QLabel(tr("code_templates.indent")))
         self.indent_unit_combo = QComboBox()
-        self.indent_unit_combo.addItems(["Пробелы", "Табуляция"])
+        self.indent_unit_combo.addItems([tr("code_templates.spaces"), tr("code_templates.tab")])
         self.indent_unit_combo.currentIndexChanged.connect(self._on_settings_changed)
         settings_row.addWidget(self.indent_unit_combo)
-        settings_row.addWidget(QLabel("Ширина:"))
+        settings_row.addWidget(QLabel(tr("code_templates.width")))
         self.indent_width_spin = QSpinBox()
         self.indent_width_spin.setRange(1, 8)
         self.indent_width_spin.valueChanged.connect(self._on_settings_changed)
         settings_row.addWidget(self.indent_width_spin)
-        settings_row.addWidget(QLabel("Префикс комментария:"))
+        settings_row.addWidget(QLabel(tr("code_templates.comment_prefix")))
         self.comment_prefix_edit = QLineEdit()
         self.comment_prefix_edit.setFixedWidth(50)
         self.comment_prefix_edit.textChanged.connect(self._on_settings_changed)
@@ -85,7 +83,7 @@ class CodeTemplatesDialog(QDialog):
 
         left = QWidget()
         left_l = QVBoxLayout(left)
-        left_l.addWidget(QLabel("Тип ноды:"))
+        left_l.addWidget(QLabel(tr("code_templates.node_type")))
         self.node_type_combo = QComboBox()
         for key in DEFAULT_TEMPLATES:
             label = NODE_TYPE_LABELS.get(key, key)
@@ -96,17 +94,17 @@ class CodeTemplatesDialog(QDialog):
 
         self.vars_lbl = QLabel()
         self.vars_lbl.setWordWrap(True)
-        self.vars_lbl.setStyleSheet("color:#888; font-size:11px;")
+        self.vars_lbl.setObjectName("hint_text")
         left_l.addWidget(self.vars_lbl)
 
-        left_l.addWidget(QLabel("Jinja2-шаблон (одна нода → строка/строки):"))
+        left_l.addWidget(QLabel(tr("code_templates.jinja_template")))
         self.template_edit = QTextEdit()
         self.template_edit.setStyleSheet("font-family: monospace; font-size:12px;")
         self.template_edit.textChanged.connect(self._update_preview)
         left_l.addWidget(self.template_edit, 1)
 
         btn_row = QHBoxLayout()
-        btn_reset = QPushButton("Сбросить к стандартному")
+        btn_reset = QPushButton(tr("code_templates.reset_default"))
         btn_reset.clicked.connect(self._reset_current)
         btn_row.addWidget(btn_reset)
         btn_row.addStretch()
@@ -114,10 +112,11 @@ class CodeTemplatesDialog(QDialog):
 
         right = QWidget()
         right_l = QVBoxLayout(right)
-        right_l.addWidget(QLabel("Предпросмотр (пример данных):"))
+        right_l.addWidget(QLabel(tr("code_templates.preview_label")))
         self.preview_edit = QTextEdit()
         self.preview_edit.setReadOnly(True)
-        self.preview_edit.setStyleSheet("font-family: monospace; font-size:12px; background:#1a1a21;")
+        self.preview_edit.setObjectName("code_box")
+        self.preview_edit.setStyleSheet("font-size:12px;")
         right_l.addWidget(self.preview_edit, 1)
 
         split.addWidget(left)
@@ -127,7 +126,7 @@ class CodeTemplatesDialog(QDialog):
 
         bottom = QHBoxLayout()
         bottom.addStretch()
-        btn_close = QPushButton("Сохранить и закрыть")
+        btn_close = QPushButton(tr("code_templates.save_close"))
         btn_close.setObjectName("btn_primary")
         btn_close.clicked.connect(self._save_and_close)
         bottom.addWidget(btn_close)
@@ -166,7 +165,7 @@ class CodeTemplatesDialog(QDialog):
         self._prev_key = key
         if not key:
             return
-        self.vars_lbl.setText(f"Доступные переменные: {TEMPLATE_VARS_HELP.get(key, '')}")
+        self.vars_lbl.setText(tr("code_templates.available_vars", vars=TEMPLATE_VARS_HELP.get(key, '')))
         self.template_edit.blockSignals(True)
         self.template_edit.setPlainText(self.store.get_template_text(key))
         self.template_edit.blockSignals(False)
@@ -187,17 +186,19 @@ class CodeTemplatesDialog(QDialog):
         sample.setdefault("comment_prefix", self.comment_prefix_edit.text() or "#")
 
         if not JINJA2_AVAILABLE:
-            self.preview_edit.setPlainText("(предпросмотр недоступен без пакета jinja2)")
+            self.preview_edit.setPlainText(tr("code_templates.preview_unavailable"))
             return
 
         import jinja2
         try:
             rendered = jinja2.Template(text, undefined=jinja2.Undefined).render(**sample)
-            self.preview_edit.setStyleSheet("font-family: monospace; font-size:12px; background:#1a1a21; color:#ddd;")
+            self.preview_edit.setObjectName("code_box")
+            self.preview_edit.setStyleSheet("font-size:12px;")
             self.preview_edit.setPlainText(rendered)
         except Exception as e:
-            self.preview_edit.setStyleSheet("font-family: monospace; font-size:12px; background:#331a1a; color:#ff8080;")
-            self.preview_edit.setPlainText(f"Ошибка шаблона:\n{e}")
+            self.preview_edit.setObjectName("error_mono")
+            self.preview_edit.setStyleSheet("font-size:12px;")
+            self.preview_edit.setPlainText(tr("code_templates.template_error", error=e))
 
     def _save_and_close(self):
         key = self._current_key()

@@ -1,6 +1,8 @@
 """
 Панель редактирования ноды (правая панель)
 """
+import os
+import shutil
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QTextEdit, QComboBox, QPushButton, QCheckBox, QDoubleSpinBox,
@@ -8,76 +10,91 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from core.models import SceneNode, NodeType, ANCHOR_POSITIONS, NAMED_SPRITE_POSITIONS, nearest_anchor_name
+from core.i18n import tr, plural
 from core.renpy_text_tags import strip_tags
 from core.spellcheck import check_text
 from ui.resource_carousel import ResourceCarousel, FolderResourceCarousel, CharacterGroupPicker, CompositeSpriteCarousel
 from ui.audio_preview import get_player as get_audio_player
 from ui.waveform_widget import WaveformWidget
+from ui.theme import theme_manager, fade_in_widget
+from ui.atl_editor_dialog import AtlEditorDialog
+from ui.pixmap_cache import get_pixmap, get_composite
+from ui.transition_editor_dialog import TransitionEditorDialog
 
 
 TRANSITIONS = ["", "dissolve", "fade", "fade2", "fade3", "flash", "pixellate",
                "blinds", "squares", "wipeleft", "wiperight", "wipeup",
                "wipedown", "vpunch", "hpunch", "dspr"]
 
-NODE_TYPES = [
-    ("dialogue",     "💬 Диалог"),
-    ("narration",    "📖 Нарратор"),
-    ("scene",     "🎬 Сцена (scene)"),
-    ("show_bg",   "🖼 Фон (show)"),
-    ("show_cg",           "🎨 CG (show)"),
-    ("show_sprite",  "👤 Показать спрайт"),
-    ("hide_sprite",  "❌ Скрыть спрайт"),
-    ("window",       "🪟 Текстовое окно (show/hide)"),
-    ("with_transition", "✨ Эффект (with)"),
-    ("nvl_mode",     "📖 Режим NVL/ADV"),
-    ("play_music",        "🎵 Музыка"),
-    ("stop_music",        "🔇 Стоп музыка"),
-    ("play_sound",        "🔊 Звук"),
-    ("play_ambience",     "🌬 Эмбиенс (play)"),
-    ("stop_ambience",     "🌬 Эмбиенс (stop)"),
-    ("label",        "🏷 Метка (label)"),
-    ("jump",         "↪ Переход (jump)"),
-    ("menu",         "📋 Меню выбора"),
-    ("pause",        "⏸ Пауза"),
-    ("return_",      "⏹ Return"),
-    ("python",       "🐍 Python код"),
-    ("raw",          "🧩 Необработанный код (импорт)"),
-    ("custom",       "🧬 Пользовательская нода..."),
-]
+def _node_types():
+    return [
+        ("dialogue", tr("node_type.dialogue")),
+        ("narration", tr("node_type.narration")),
+        ("scene", tr("node_type.scene")),
+        ("show_bg", tr("node_type.show_bg")),
+        ("show_cg", tr("node_type.show_cg")),
+        ("show_sprite", tr("node_type.show_sprite")),
+        ("hide_sprite", tr("node_type.hide_sprite")),
+        ("window", tr("node_type.window")),
+        ("with_transition", tr("node_type.with_transition")),
+        ("nvl_mode", tr("node_type.nvl_mode")),
+        ("play_music", tr("node_type.play_music")),
+        ("stop_music", tr("node_type.stop_music")),
+        ("play_sound", tr("node_type.play_sound")),
+        ("play_ambience", tr("node_type.play_ambience")),
+        ("stop_ambience", tr("node_type.stop_ambience")),
+        ("label", tr("node_type.label")),
+        ("jump", tr("node_type.jump")),
+        ("menu", tr("node_type.menu")),
+        ("pause", tr("node_type.pause")),
+        ("return_", tr("node_type.return_")),
+        ("python", tr("node_type.python")),
+        ("raw", tr("node_type.raw")),
+        ("custom", tr("node_type.custom")),
+    ]
+
+
+NODE_TYPES = _node_types
 
 
 def _label(text: str) -> QLabel:
     lbl = QLabel(text)
-    lbl.setStyleSheet("color:#aaa; font-size:11px;")
+    lbl.setObjectName("hint_text")
     return lbl
 
 
 def _field(placeholder: str = "") -> QLineEdit:
     f = QLineEdit()
     f.setPlaceholderText(placeholder)
-    f.setStyleSheet("""
-        QLineEdit {
-            background:#2a2a2a; color:#fff; border:1px solid #444;
+    t = theme_manager.tokens()
+    f.setStyleSheet(f"""
+        QLineEdit {{
+            background:{t.base_field}; color:{t.text}; border:1px solid {t.glass_border_s};
             border-radius:4px; padding:4px 6px; font-size:12px;
-        }
-        QLineEdit:focus { border-color:#ff8c3d; }
+        }}
+        QLineEdit:focus {{ border-color:{t.accent_1}; }}
     """)
     return f
+
+
+def _style_combo(cb: QComboBox):
+    t = theme_manager.tokens()
+    cb.setStyleSheet(f"""
+        QComboBox {{
+            background:{t.base_field}; color:{t.text}; border:1px solid {t.glass_border_s};
+            border-radius:4px; padding:4px 6px; font-size:12px;
+        }}
+        QComboBox:focus {{ border-color:{t.accent_1}; }}
+        QComboBox QAbstractItemView {{
+            background:{t.dropdown_bg}; color:{t.text}; selection-background-color:{t.accent_1};
+        }}
+    """)
 
 
 def _combo(items: list) -> QComboBox:
     cb = QComboBox()
     cb.addItems(items)
-    cb.setStyleSheet("""
-        QComboBox {
-            background:#2a2a2a; color:#fff; border:1px solid #444;
-            border-radius:4px; padding:4px 6px; font-size:12px;
-        }
-        QComboBox:focus { border-color:#ff8c3d; }
-        QComboBox QAbstractItemView {
-            background:#2a2a2a; color:#fff; selection-background-color:#ff8c3d;
-        }
-    """)
+    _style_combo(cb)
     return cb
 
 
@@ -89,35 +106,36 @@ def _transition_combo(current_value: str = "") -> QComboBox:
     cb = QComboBox()
     cb.addItems(TRANSITIONS)
     cb.setEditable(True)
-    cb.setStyleSheet("""
-        QComboBox {
-            background:#2a2a2a; color:#fff; border:1px solid #444;
+    t = theme_manager.tokens()
+    cb.setStyleSheet(f"""
+        QComboBox {{
+            background:{t.base_field}; color:{t.text}; border:1px solid {t.glass_border_s};
             border-radius:4px; padding:4px 28px 4px 6px; font-size:12px;
-        }
-        QComboBox:focus { border-color:#ff8c3d; }
-        QComboBox::drop-down {
+        }}
+        QComboBox:focus {{ border-color:{t.accent_1}; }}
+        QComboBox::drop-down {{
             subcontrol-origin: padding;
             subcontrol-position: top right;
             width: 22px;
-            border-left: 1px solid #555;
+            border-left: 1px solid {t.glass_border_s};
             border-radius: 0 4px 4px 0;
-            background: #3a3a3a;
-        }
-        QComboBox::down-arrow {
+            background: {t.button_bg};
+        }}
+        QComboBox::down-arrow {{
             width: 10px; height: 10px;
-            border-left: 2px solid #aaa;
-            border-bottom: 2px solid #aaa;
+            border-left: 2px solid {t.text_muted};
+            border-bottom: 2px solid {t.text_muted};
             transform: rotate(-45deg);
-        }
-        QComboBox QAbstractItemView {
-            background:#2a2a2a; color:#fff;
-            selection-background-color:#ff8c3d;
-            border: 1px solid #555;
-        }
-        QComboBox QLineEdit {
-            background:#2a2a2a; color:#fff;
+        }}
+        QComboBox QAbstractItemView {{
+            background:{t.dropdown_bg}; color:{t.text};
+            selection-background-color:{t.accent_1};
+            border: 1px solid {t.glass_border_s};
+        }}
+        QComboBox QLineEdit {{
+            background:{t.dropdown_bg}; color:{t.text};
             border: none; padding: 0;
-        }
+        }}
     """)
     if current_value and current_value not in TRANSITIONS:
         cb.addItem(current_value)
@@ -125,18 +143,7 @@ def _transition_combo(current_value: str = "") -> QComboBox:
     return cb
 
 
-CALL_VS_JUMP_TOOLTIP = (
-    "По умолчанию переход на метку делается через jump.\n\n"
-    "Разница между jump и call важна, если внутри метки что-то присваивается "
-    "и затем стоит return:\n"
-    "• jump - просто переходит на метку и забывает, откуда пришёл. Если в той "
-    "метке встретится return, Ren'Py решит, что сценарий закончился, и игра "
-    "выйдет в главное меню.\n"
-    "• call - переходит на метку, но запоминает место вызова. После return "
-    "игра вернётся обратно, на следующую строку после этого варианта меню.\n\n"
-    "Включите галочку «call», если метка должна вернуть игрока сюда же после "
-    "return, а не выкинуть в главное меню."
-)
+CALL_VS_JUMP_TOOLTIP = tr("ne.call_vs_jump_tooltip")
 
 
 class MenuChoiceRow(QFrame):
@@ -152,22 +159,23 @@ class MenuChoiceRow(QFrame):
                                                                            
                                                                        
         self.branch_nodes = nodes if nodes is not None else []
-        self.setStyleSheet("QFrame { background:#252525; border-radius:4px; padding:2px; }")
+        self.setObjectName("surface_frame")
+        self.setStyleSheet("padding:2px;")
         outer = QVBoxLayout(self)
         outer.setContentsMargins(4, 2, 4, 2)
         outer.setSpacing(2)
 
         row = QHBoxLayout()
-        self.text_edit = _field("Текст варианта")
+        self.text_edit = _field(tr("ne.choice_text_placeholder"))
         self.text_edit.setText(text)
         self.text_edit.textChanged.connect(lambda *_: self.changed.emit())
-        self.jump_edit = _field("метка (если jump/call)")
+        self.jump_edit = _field(tr("ne.choice_label_placeholder"))
         self.jump_edit.setFixedWidth(150)
         self.jump_edit.setText(jump)
         self.jump_edit.textChanged.connect(lambda *_: self.changed.emit())
         btn = QPushButton("✕")
         btn.setFixedSize(24, 24)
-        btn.setStyleSheet("QPushButton { background:#c0392b; color:#fff; border-radius:4px; }")
+        btn.setObjectName("btn_danger")
         btn.clicked.connect(self.removed.emit)
         row.addWidget(self.text_edit)
         row.addWidget(_label("→"))
@@ -177,15 +185,17 @@ class MenuChoiceRow(QFrame):
 
         call_row = QHBoxLayout()
         call_row.setContentsMargins(0, 0, 0, 0)
-        self.call_check = QCheckBox("call (вернуться сюда после return, а не в jump)")
+        self.call_check = QCheckBox(tr("ne.call_checkbox"))
         self.call_check.setChecked(bool(use_call))
-        self.call_check.setStyleSheet("QCheckBox { color:#aaa; font-size:11px; }")
+        self.call_check.setObjectName("hint_text")
+        self.call_check.setStyleSheet("font-size:11px;")
         self.call_check.setToolTip(CALL_VS_JUMP_TOOLTIP)
         self.call_check.stateChanged.connect(lambda *_: self.changed.emit())
         call_row.addWidget(self.call_check)
         call_row.addStretch()
         help_lbl = QLabel("ⓘ")
-        help_lbl.setStyleSheet("color:#888; font-weight:bold;")
+        help_lbl.setObjectName("hint_text")
+        help_lbl.setStyleSheet("font-weight:bold;")
         help_lbl.setToolTip(CALL_VS_JUMP_TOOLTIP)
         call_row.addWidget(help_lbl)
         outer.addLayout(call_row)
@@ -200,11 +210,7 @@ class MenuChoiceRow(QFrame):
             " border-radius:4px; padding:4px 8px; text-align:left; }"
             "QPushButton:hover { background:#35573f; }"
         )
-        self._branch_btn.setToolTip(
-            "Открывает эту ветку как полноценный список нод (диалоги, показ спрайтов, "
-            "музыка, вложенное меню и т.д.) - так же, как редактируется обычная сцена. "
-            "Если ветка не пустая, она выполняется вместо jump/call и «Тела варианта»."
-        )
+        self._branch_btn.setToolTip(tr("ne.branch_button_tooltip"))
         self._branch_btn.clicked.connect(self.open_branch.emit)
         self._update_branch_btn_text()
         branch_row.addWidget(self._branch_btn, 1)
@@ -213,29 +219,21 @@ class MenuChoiceRow(QFrame):
                                                                              
         body_toggle_row = QHBoxLayout()
         body_toggle_row.setContentsMargins(0, 2, 0, 0)
-        self._body_toggle_btn = QPushButton("▶ Тело варианта (raw-текст, если ветка без нод)")
+        self._body_toggle_btn = QPushButton(tr("ne.body_toggle_collapsed"))
         self._body_toggle_btn.setFlat(True)
-        self._body_toggle_btn.setStyleSheet(
-            "QPushButton { color:#ff8c3d; font-size:11px; text-align:left; border:none; padding:0; }"
-            "QPushButton:hover { color:#ffa020; }"
-        )
+        self._body_toggle_btn.setObjectName("link_btn")
+        self._body_toggle_btn.setStyleSheet("font-size:11px;")
         self._body_toggle_btn.clicked.connect(self._toggle_body)
         body_toggle_row.addWidget(self._body_toggle_btn)
         body_toggle_row.addStretch()
         outer.addLayout(body_toggle_row)
 
         self.body_edit = QTextEdit()
-        self.body_edit.setPlaceholderText(
-            "Код варианта - будет вставлен как есть (scene, show, диалог, jump, ...)"
-        )
+        self.body_edit.setPlaceholderText(tr("ne.body_placeholder"))
         self.body_edit.setPlainText(raw_body)
         self.body_edit.setMinimumHeight(90)
         self.body_edit.setMaximumHeight(300)
-        self.body_edit.setStyleSheet(
-            "QTextEdit { background:#1e1e1e; color:#ddd; border:1px solid #444;"
-            " border-radius:4px; padding:4px; font-family:monospace; font-size:11px; }"
-            "QTextEdit:focus { border-color:#ff8c3d; }"
-        )
+        self.body_edit.setObjectName("code_field")
         self.body_edit.textChanged.connect(lambda: self.changed.emit())
         outer.addWidget(self.body_edit)
 
@@ -243,16 +241,16 @@ class MenuChoiceRow(QFrame):
         self._body_visible = bool(raw_body and raw_body.strip())
         self.body_edit.setVisible(self._body_visible)
         self._body_toggle_btn.setText(
-            "▼ Тело варианта (inline-сценарий)" if self._body_visible
-            else "▶ Тело варианта (inline-сценарий)"
+            tr("ne.body_toggle_expanded") if self._body_visible
+            else tr("ne.body_toggle_collapsed")
         )
 
     def _toggle_body(self):
         self._body_visible = not self._body_visible
         self.body_edit.setVisible(self._body_visible)
         self._body_toggle_btn.setText(
-            "▼ Тело варианта (inline-сценарий)" if self._body_visible
-            else "▶ Тело варианта (inline-сценарий)"
+            tr("ne.body_toggle_expanded") if self._body_visible
+            else tr("ne.body_toggle_collapsed")
         )
 
     def get_use_call(self) -> bool:
@@ -267,10 +265,10 @@ class MenuChoiceRow(QFrame):
     def _update_branch_btn_text(self):
         count = len(self.branch_nodes)
         if count:
-            word = "нода" if count == 1 else ("ноды" if 2 <= count % 10 <= 4 and not 12 <= count % 100 <= 14 else "нод")
-            self._branch_btn.setText(f"🧩 Ветка: {count} {word} - открыть в редакторе ▸")
+            word = plural(count, {"ru": ("нода", "ноды", "нод"), "en": ("node", "nodes")})
+            self._branch_btn.setText(tr("ne.branch_button_text", count=count, word=word))
         else:
-            self._branch_btn.setText("🧩 Вписать сценарий (ноды) в эту ветку ▸")
+            self._branch_btn.setText(tr("ne.branch_button_empty"))
 
     def refresh_branch_button(self):
         self._update_branch_btn_text()
@@ -300,6 +298,35 @@ class NodeEditor(QWidget):
         self.choice_rows: list[MenuChoiceRow] = []
         self._build()
         self.refresh_resources()
+        theme_manager.themeChanged.connect(self._on_theme_changed)
+
+    def _style_apply_btn(self):
+        t = theme_manager.tokens()
+        if t.flat_buttons:
+            bg = f"background:{t.accent_1};"
+            hover_bg = f"background:{t.accent_2};"
+        else:
+            bg = f"background:qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 {t.accent_1}, stop:1 {t.accent_2});"
+            hover_bg = f"background:{t.accent_1};"
+        self.apply_btn.setStyleSheet(f"""
+            QPushButton#btn_apply_primary {{
+                {bg}
+                color:{t.accent_text}; font-weight:bold;
+                padding:8px; font-size:12px;
+            }}
+            QPushButton#btn_apply_primary:hover {{ {hover_bg} }}
+        """)
+
+    def _on_theme_changed(self, _theme_id: str):
+        """Кнопка "Применить изменения" и поля панели параметров красятся
+        через локальные setStyleSheet(...) (не через глобальный QSS), т.к.
+        им нужны неоднородные состояния (фокус, выпадающий список и т.п.).
+        При смене темы перекрашиваем кнопку сразу, а поля - через
+        пересборку панели (если сейчас открыта какая-то нода)."""
+        self._style_apply_btn()
+        _style_combo(self.type_combo)
+        if self.node is not None:
+            self._rebuild_fields()
 
     def _node_type_value(self, node_type):
         return node_type.value if hasattr(node_type, 'value') else node_type
@@ -351,20 +378,21 @@ class NodeEditor(QWidget):
         self.xalign_spin.blockSignals(False)
 
     def _build(self):
-        self.setStyleSheet("background:#1e1e1e;")
+        self.setObjectName("code_box")
         outer = QVBoxLayout(self)
         outer.setContentsMargins(8, 8, 8, 8)
         outer.setSpacing(6)
 
-        title = QLabel("Панель параметров")
-        title.setStyleSheet("color:#ff8c3d; font-size:13px; font-weight:bold; padding:4px;")
+        title = QLabel(tr("ne.panel_title"))
+        title.setObjectName("accent_caption")
+        title.setStyleSheet("font-size:13px; padding:4px;")
         outer.addWidget(title)
 
                             
         type_row = QHBoxLayout()
-        type_row.addWidget(_label("Тип ноды:"))
-        self.type_combo = _combo([label for _, label in NODE_TYPES])
-        self.type_combo.setToolTip("Тип ноды определяет, какая команда Ren'Py будет сгенерирована (реплика, показ фона, переход, пауза и т.д.)")
+        type_row.addWidget(_label(tr("ne.node_type_label")))
+        self.type_combo = _combo([label for _, label in NODE_TYPES()])
+        self.type_combo.setToolTip(tr("ne.node_type_tooltip"))
         self.type_combo.currentIndexChanged.connect(self._on_type_changed)
         type_row.addWidget(self.type_combo)
         outer.addLayout(type_row)
@@ -372,9 +400,9 @@ class NodeEditor(QWidget):
                                         
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll.setStyleSheet("QScrollArea { border:none; background:#1e1e1e; }")
+        scroll.setObjectName("surface_scroll")
         self.fields_widget = QWidget()
-        self.fields_widget.setStyleSheet("background:#1e1e1e;")
+        self.fields_widget.setObjectName("code_box")
         self.fields_layout = QVBoxLayout(self.fields_widget)
         self.fields_layout.setContentsMargins(0, 4, 0, 4)
         self.fields_layout.setSpacing(6)
@@ -383,14 +411,10 @@ class NodeEditor(QWidget):
         outer.addWidget(scroll)
 
                       
-        apply_btn = QPushButton("✔ Применить изменения")
-        apply_btn.setStyleSheet("""
-            QPushButton {
-                background:#ff8c3d; color:#000; font-weight:bold;
-                border-radius:6px; padding:8px; font-size:12px;
-            }
-            QPushButton:hover { background:#ffa020; }
-        """)
+        apply_btn = QPushButton(tr("ne.apply_button"))
+        apply_btn.setObjectName("btn_apply_primary")
+        self.apply_btn = apply_btn
+        self._style_apply_btn()
         apply_btn.clicked.connect(self._apply)
         outer.addWidget(apply_btn)
 
@@ -400,13 +424,26 @@ class NodeEditor(QWidget):
         self.node = node
         self.characters = characters
         self.asset_vars = asset_vars
-        type_keys = [k for k, _ in NODE_TYPES]
+        type_keys = [k for k, _ in NODE_TYPES()]
         current = self._node_type_value(node.node_type)
         idx = type_keys.index(current) if current in type_keys else 0
         self.type_combo.blockSignals(True)
         self.type_combo.setCurrentIndex(idx)
         self.type_combo.blockSignals(False)
         self._rebuild_fields()
+
+    def flush(self):
+        """Немедленно применяет текущее состояние полей формы к ноде, если
+        она есть - не дожидаясь потери фокуса конкретным полем. Большинство
+        полей и так применяются "вживую" по мере ввода (textChanged и т.п.),
+        но некоторые (например, числовые параметры пользовательских нод)
+        применяются только по editingFinished. Вызывается перед любым
+        действием, которое переключает/удаляет/добавляет ноду (кнопки
+        "Добавить", "Дублировать", смена выбранной ноды и т.д.), чтобы не
+        требовать от пользователя обязательного клика по кнопке "Применить"
+        перед тем, как перейти к следующей ноде."""
+        if self.node is not None:
+            self._apply()
 
                                                                                  
 
@@ -418,7 +455,7 @@ class NodeEditor(QWidget):
                 'music': NodeType.PLAY_MUSIC,
                 'sound': NodeType.PLAY_SOUND,
             }
-            value = [k for k, _ in NODE_TYPES][idx]
+            value = [k for k, _ in NODE_TYPES()][idx]
             self.node.node_type = mapping.get(value, NodeType(value))
         self._rebuild_fields()
 
@@ -430,6 +467,18 @@ class NodeEditor(QWidget):
             item = self.fields_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
+                                                                            
+                                                                              
+                                                                         
+                                                                              
+                                                                              
+                                                                       
+        for attr in (
+            "fadein_spin", "fadeout_spin", "ambience_fadeout_spin", "waveform",
+            "audio_combo", "loop_check", "raw_edit", "char_combo",
+        ):
+            if hasattr(self, attr):
+                delattr(self, attr)
 
     def _stop_audio_preview(self):
         """Останавливает общий плеер превью при уходе с аудио-ноды (или при
@@ -484,17 +533,19 @@ class NodeEditor(QWidget):
         elif t == "custom":
             self._add_custom_fields()
 
+        fade_in_widget(self.fields_widget, duration=160)
+
     def _insert(self, widget: QWidget):
         self.fields_layout.insertWidget(self.fields_layout.count() - 1, widget)
 
     def _add_dialogue_fields(self):
         n = self.node
         if self._node_type_value(n.node_type) == "dialogue":
-            grp = QGroupBox("Персонаж")
-            grp.setStyleSheet("QGroupBox { color:#888; border:1px solid #333; border-radius:4px; margin-top:8px; padding-top:8px; }")
+            grp = QGroupBox(tr("ne.character_group"))
+            grp.setObjectName("plain_box")
             g = QVBoxLayout(grp)
-            self.char_combo = _combo(["- нарратор -"] + [c.name for c in self.characters])
-            self.char_combo.setToolTip("Кто говорит эту реплику. «- нарратор -» - реплика без персонажа (показывается без имени, обычно курсивом/по-другому в теме игры)")
+            self.char_combo = _combo([tr("ne.narrator_option")] + [c.name for c in self.characters])
+            self.char_combo.setToolTip(tr("ne.character_combo_tooltip"))
             if n.character_var:
                 vars = [c.variable for c in self.characters]
                 if n.character_var in vars:
@@ -503,8 +554,8 @@ class NodeEditor(QWidget):
             g.addWidget(self.char_combo)
             self._insert(grp)
 
-        grp2 = QGroupBox("Текст реплики")
-        grp2.setStyleSheet("QGroupBox { color:#888; border:1px solid #333; border-radius:4px; margin-top:8px; padding-top:8px; }")
+        grp2 = QGroupBox(tr("ne.dialogue_text_group"))
+        grp2.setObjectName("plain_box")
         g2 = QVBoxLayout(grp2)
 
         tag_row = QHBoxLayout()
@@ -512,37 +563,32 @@ class NodeEditor(QWidget):
 
         def _tag_btn(label: str, tooltip: str, handler):
             btn = QPushButton(label)
-            btn.setObjectName("btn_secondary")
+            btn.setObjectName("tag_chip_btn")
             btn.setFixedHeight(24)
             btn.setToolTip(tooltip)
-            btn.setStyleSheet("QPushButton { padding:0 6px; font-size:11px; }")
+            btn.setStyleSheet("font-size:11px;")
             btn.clicked.connect(handler)
             tag_row.addWidget(btn)
             return btn
 
-        _tag_btn("𝑖", "Курсив {i}...{/i}", lambda: self._wrap_selection_with_tag("i"))
-        _tag_btn("𝐛", "Жирный {b}...{/b}", lambda: self._wrap_selection_with_tag("b"))
-        _tag_btn("u̲", "Подчёркнутый {u}...{/u}", lambda: self._wrap_selection_with_tag("u"))
-        _tag_btn("🤫", "Шёпот (уменьшенный, приглушённый курсив)", self._insert_whisper_tag)
-        _tag_btn("A±", "Размер шрифта {size=+10}...{/size}", lambda: self._wrap_selection_with_tag("size=+10", "size"))
-        _tag_btn("🎨", "Цвет текста {color=#ffcf40}...{/color}", self._insert_color_tag)
-        _tag_btn("⏳w", "Пауза с ожиданием клика {w}", lambda: self._insert_at_cursor("{w}"))
-        _tag_btn("⏭nw", "Продолжить без ожидания {nw}", lambda: self._insert_at_cursor("{nw}"))
+        _tag_btn("𝑖", tr("ne.tag_italic_tooltip"), lambda: self._wrap_selection_with_tag("i"))
+        _tag_btn("𝐛", tr("ne.tag_bold_tooltip"), lambda: self._wrap_selection_with_tag("b"))
+        _tag_btn("u̲", tr("ne.tag_underline_tooltip"), lambda: self._wrap_selection_with_tag("u"))
+        _tag_btn("🤫", tr("ne.tag_whisper_tooltip"), self._insert_whisper_tag)
+        _tag_btn("A±", tr("ne.tag_size_tooltip"), lambda: self._wrap_selection_with_tag("size=+10", "size"))
+        _tag_btn("🎨", tr("ne.tag_color_tooltip"), self._insert_color_tag)
+        _tag_btn("⏳w", tr("ne.tag_wait_tooltip"), lambda: self._insert_at_cursor("{w}"))
+        _tag_btn("⏭nw", tr("ne.tag_nowait_tooltip"), lambda: self._insert_at_cursor("{nw}"))
         tag_row.addStretch()
         g2.addLayout(tag_row)
 
         self.text_edit = QTextEdit()
-        self.text_edit.setToolTip("Текст реплики/повествования. Можно использовать теги Ren'Py ({i}, {b}, {color=...} и т.п.) - см. панель тегов выше.")
-        self.text_edit.setPlaceholderText("Введите текст реплики...")
+        self.text_edit.setToolTip(tr("ne.dialogue_text_tooltip"))
+        self.text_edit.setPlaceholderText(tr("ne.dialogue_text_placeholder"))
         self.text_edit.setText(n.text)
         self.text_edit.setMinimumHeight(80)
-        self.text_edit.setStyleSheet("""
-            QTextEdit {
-                background:#2a2a2a; color:#fff; border:1px solid #444;
-                border-radius:4px; padding:4px; font-size:12px;
-            }
-            QTextEdit:focus { border-color:#ff8c3d; }
-        """)
+        self.text_edit.setObjectName("dark_field")
+        self.text_edit.setStyleSheet("QTextEdit#dark_field { font-size:12px; }")
         self.text_edit.textChanged.connect(lambda: self._apply())
         self.text_edit.textChanged.connect(self._update_length_hint)
         self.text_edit.textChanged.connect(self._update_spellcheck_hint)
@@ -555,7 +601,8 @@ class NodeEditor(QWidget):
         self._update_length_hint()
 
         self.spellcheck_hint_lbl = QLabel()
-        self.spellcheck_hint_lbl.setStyleSheet("font-size:11px; padding:2px 0; color:#ffb84d;")
+        self.spellcheck_hint_lbl.setObjectName("warning_hint")
+        self.spellcheck_hint_lbl.setStyleSheet("padding:2px 0;")
         self.spellcheck_hint_lbl.setWordWrap(True)
         g2.addWidget(self.spellcheck_hint_lbl)
         self._update_spellcheck_hint()
@@ -617,18 +664,16 @@ class NodeEditor(QWidget):
         raw = self.text_edit.toPlainText()
         count = len(strip_tags(raw))
         tag_count = len(raw) - count
-        tag_note = f" (+{tag_count} симв. тегов формата, не считаются)" if tag_count else ""
+        tag_note = tr("ne.tag_symbols_note", count=tag_count) if tag_count else ""
         if count <= self.DIALOGUE_LEN_OK:
             color = "#7ed957"
-            msg = f"✓ {count} симв.{tag_note} - уместится в диалоговое окно нормально."
+            msg = tr("ne.length_ok", count=count, note=tag_note)
         elif count <= self.DIALOGUE_LEN_UGLY:
             color = "#ffb84d"
-            msg = (f"⚠ {count} симв.{tag_note} - влезет, но может выглядеть некрасиво "
-                   f"(мелкий текст/много строк). Стоит сократить.")
+            msg = tr("ne.length_ugly", count=count, note=tag_note)
         else:
             color = "#ff6b6b"
-            msg = (f"✕ {count} симв.{tag_note} - скорее всего НЕ влезет в стандартное "
-                   f"диалоговое окно. Разбейте реплику на несколько.")
+            msg = tr("ne.length_overflow", count=count, note=tag_note)
         self.length_hint_lbl.setStyleSheet(f"font-size:11px; padding:2px 0; color:{color};")
         self.length_hint_lbl.setText(msg)
 
@@ -667,11 +712,11 @@ class NodeEditor(QWidget):
     def _add_bg_fields(self, t: str):
         n = self.node
         cat = "cg" if t == "show_cg" else "bg"                                          
-        label = "Выберите CG" if t == "show_cg" else "Выберите фон"
+        label = tr("ne.select_cg") if t == "show_cg" else tr("ne.select_bg")
         current = n.cg_var if t == "show_cg" else n.bg_var
 
         grp = QGroupBox(label)
-        grp.setStyleSheet("QGroupBox { color:#888; border:1px solid #333; border-radius:4px; margin-top:8px; padding-top:8px; }")
+        grp.setObjectName("plain_box")
         g = QVBoxLayout(grp)
 
         entries = self.rm.get(cat) if self.rm is not None else []
@@ -688,25 +733,135 @@ class NodeEditor(QWidget):
         g.addWidget(self.bg_carousel)
 
         if not entries:
-            empty = QLabel(f"Нет файлов в resources/{cat}/. Добавьте изображения и нажмите F5.")
-            empty.setStyleSheet("color:#777; font-size:11px;")
+            empty = QLabel(tr("ne.no_files_in_resources", cat=cat))
+            empty.setObjectName("hint_text")
             empty.setWordWrap(True)
             g.addWidget(empty)
 
-        g.addWidget(_label("Переход:"))
+        g.addWidget(_label(tr("ne.transition_label")))
         self.trans_combo = _transition_combo(n.transition)
-        self.trans_combo.setToolTip("Анимация перехода Ren'Py (with dissolve и т.п.). Пусто - мгновенная смена без анимации.")
+        self.trans_combo.setToolTip(tr("ne.transition_tooltip"))
         self.trans_combo.currentIndexChanged.connect(lambda *_: self._apply())
         g.addWidget(self.trans_combo)
+        trans_btn = QPushButton(tr("ne.transition_button"))
+        trans_btn.clicked.connect(lambda: self._open_transition_editor(self.trans_combo, n.bg_var or n.cg_var or ""))
+        g.addWidget(trans_btn)
+
+        self.atl_btn = QPushButton(
+            tr("ne.atl_button_active") if n.atl_script.strip() else tr("ne.atl_button"))
+        self.atl_btn.setToolTip(tr("ne.atl_hint"))
+        self.atl_btn.clicked.connect(lambda: self._open_atl_editor(is_bg=True))
+        g.addWidget(self.atl_btn)
+
         self._insert(grp)
+
+    def _resolve_pixmap_by_var(self, var: str):
+        """Возвращает QPixmap для var (обычный ресурс или составной спрайт из
+        sprites.rpy) - используется живым предпросмотром ATL, чтобы честно
+        показывать РЕАЛЬНУЮ картинку (базовую и все image-swap варианты),
+        а не силуэт-заглушку."""
+        if not var or self.rm is None:
+            return None
+        composite = self.rm.find_composite_by_name(var)
+        if composite is not None:
+            try:
+                layer_paths = [
+                    (self.rm.resolve_layer_path(layer.rel_path, composite.source), layer.offset_x, layer.offset_y)
+                    for layer in composite.layers
+                ]
+                return get_composite(layer_paths, composite.width, composite.height)
+            except Exception:
+                return None
+        entry = self.rm.find_by_var(var)
+        if entry:
+            return get_pixmap(entry.abs_path)
+        return None
+
+    def _resolve_mask_path(self, rel_path: str):
+        """См. ui/main_window.py:_resolve_mask_path - тот же резолвер,
+        нужен диалогу перехода для живого предпросмотра ImageDissolve по
+        уже сохранённому (ранее выбранному) пути маски."""
+        if not rel_path or self.rm is None:
+            return None
+        if os.path.isabs(rel_path) and os.path.isfile(rel_path):
+            return rel_path
+        for source in ("custom", "default"):
+            candidate = os.path.join(self.rm.get_source_root(source), rel_path)
+            if os.path.isfile(candidate):
+                return candidate
+        return None
+
+    def _import_transition_mask(self, src_abs_path: str):
+        """Копирует выбранный пользователем файл-маску в
+        resources/custom/transitions/ (с дедупликацией имени, как обычный
+        импорт ресурсов) и возвращает путь относительно source root -
+        именно он попадёт в сгенерированный ImageDissolve("...", ...)."""
+        if not src_abs_path or self.rm is None:
+            return None
+        dest_dir = os.path.join(self.rm.get_source_root("custom"), "transitions")
+        os.makedirs(dest_dir, exist_ok=True)
+        base_name = os.path.basename(src_abs_path)
+        stem, ext = os.path.splitext(base_name)
+        dest_name = base_name
+        counter = 2
+        while os.path.exists(os.path.join(dest_dir, dest_name)):
+            dest_name = f"{stem}_{counter}{ext}"
+            counter += 1
+        dest_path = os.path.join(dest_dir, dest_name)
+        try:
+            shutil.copy2(src_abs_path, dest_path)
+        except OSError:
+            return None
+        return f"transitions/{dest_name}"
+
+    def _open_transition_editor(self, combo: QComboBox, base_pixmap_var: str = ""):
+        """Открывает диалог настройки перехода (см.
+        ui/transition_editor_dialog.py) для комбобокса combo - готовые
+        именованные переходы либо кастомная настройка (в т.ч. ImageDissolve
+        по произвольному файлу-маске)."""
+        base_pixmap = self._resolve_pixmap_by_var(base_pixmap_var) if base_pixmap_var else None
+        dlg = TransitionEditorDialog(
+            combo.currentText(), base_pixmap=base_pixmap,
+            mask_resolver=self._resolve_mask_path,
+            mask_import_fn=self._import_transition_mask, rm=self.rm, parent=self,
+        )
+        if dlg.exec():
+            combo.setCurrentText(dlg.result_text())
+            self._apply()
+
+    def _open_atl_editor(self, is_bg: bool):
+        """Открывает диалог редактирования произвольного ATL-блока (см.
+        core/atl.py и ui/atl_editor_dialog.py) для текущей ноды show/scene."""
+        n = self.node
+        if n is None:
+            return
+        if is_bg:
+            base_xalign, base_yalign, base_zoom = 0.5, 0.5, 1.0
+            label = n.bg_var or n.cg_var or ""
+            base_pixmap = self._resolve_pixmap_by_var(label)
+        else:
+            base_xalign, base_yalign, base_zoom = n.xalign, n.yalign, n.zoom
+            label = n.sprite_var or ""
+            base_pixmap = self._resolve_pixmap_by_var(label)
+        dlg = AtlEditorDialog(
+            n.atl_script, base_xalign=base_xalign, base_yalign=base_yalign,
+            base_zoom=base_zoom, is_bg=is_bg, label=label, parent=self,
+            base_pixmap=base_pixmap, resolve_image_fn=self._resolve_pixmap_by_var,
+        )
+        if dlg.exec():
+            n.atl_script = dlg.atl_text()
+            if hasattr(self, "atl_btn"):
+                self.atl_btn.setText(
+                    tr("ne.atl_button_active") if n.atl_script.strip() else tr("ne.atl_button"))
+            self._apply()
 
     def _on_bg_group_changed(self, category_id, t: str):
         self.last_group_by_type[t] = category_id
 
     def _add_sprite_fields(self):
         n = self.node
-        grp = QGroupBox("Спрайт")
-        grp.setStyleSheet("QGroupBox { color:#888; border:1px solid #333; border-radius:4px; margin-top:8px; padding-top:8px; }")
+        grp = QGroupBox(tr("ne.sprite_group"))
+        grp.setObjectName("plain_box")
         g = QVBoxLayout(grp)
 
         has_composite = bool(self.rm and self.rm.composite_sprites)
@@ -716,8 +871,8 @@ class NodeEditor(QWidget):
         self.sprite_carousel = None
 
         if has_composite:
-            composite_label = QLabel("Составные спрайты (sprites.rpy):")
-            composite_label.setStyleSheet("color:#888; font-size:11px;")
+            composite_label = QLabel(tr("ne.composite_sprites_label"))
+            composite_label.setObjectName("hint_text")
             g.addWidget(composite_label)
             self.composite_sprite_carousel = CompositeSpriteCarousel(self.rm, thumb_size=160)
             self.composite_sprite_carousel.set_resource_manager(self.rm)
@@ -728,8 +883,9 @@ class NodeEditor(QWidget):
 
         if entries or not has_composite:
             if has_composite:
-                plain_label = QLabel("Обычные спрайты (отдельные файлы):")
-                plain_label.setStyleSheet("color:#888; font-size:11px; padding-top:6px;")
+                plain_label = QLabel(tr("ne.plain_sprites_label"))
+                plain_label.setObjectName("hint_text")
+                plain_label.setStyleSheet("padding-top:6px;")
                 g.addWidget(plain_label)
             self.sprite_carousel = FolderResourceCarousel(self.rm, category="sprites", thumb_size=160)
             self.sprite_carousel.set_resource_manager(self.rm, "sprites")
@@ -739,14 +895,12 @@ class NodeEditor(QWidget):
             g.addWidget(self.sprite_carousel)
 
         if not entries and not has_composite:
-            empty = QLabel("Нет файлов в resources/sprites/. Разложите спрайты по папкам персонажей "
-                            "(например resources/sprites/us/normal/), либо добавьте sprites.rpy "
-                            "с составными спрайтами, и нажмите F5.")
-            empty.setStyleSheet("color:#777; font-size:11px;")
+            empty = QLabel(tr("ne.no_sprite_files"))
+            empty.setObjectName("hint_text")
             empty.setWordWrap(True)
             g.addWidget(empty)
 
-        g.addWidget(_label("Позиция на сцене (якорь):"))
+        g.addWidget(_label(tr("ne.sprite_anchor_label")))
         self.xalign_spin = QComboBox()
         for name, label in ANCHOR_POSITIONS:
             self.xalign_spin.addItem(label, name)
@@ -754,18 +908,29 @@ class NodeEditor(QWidget):
         idx = self.xalign_spin.findData(current_name)
         if idx >= 0:
             self.xalign_spin.setCurrentIndex(idx)
-        self.xalign_spin.setStyleSheet("QComboBox { background:#2a2a2a; color:#fff; border:1px solid #444; border-radius:4px; padding:4px; }")
+        self.xalign_spin.setObjectName("dark_field")
         self.xalign_spin.currentIndexChanged.connect(lambda *_: self._apply())
         g.addWidget(self.xalign_spin)
 
-        g.addWidget(_label("Переход:"))
+        g.addWidget(_label(tr("ne.transition_label")))
         self.sprite_trans_combo = _transition_combo(n.transition)
         self.sprite_trans_combo.currentIndexChanged.connect(lambda *_: self._apply())
         g.addWidget(self.sprite_trans_combo)
-        hint = QLabel("Если несколько спрайтов показываются друг за другом с одним и тем же "
-                       "переходом, при экспорте они объединяются в один блок \"show ... \\n show ... \\n with ...\".")
+        sprite_trans_btn = QPushButton(tr("ne.transition_button"))
+        sprite_trans_btn.clicked.connect(
+            lambda: self._open_transition_editor(self.sprite_trans_combo, n.sprite_var or ""))
+        g.addWidget(sprite_trans_btn)
+
+        self.atl_btn = QPushButton(
+            tr("ne.atl_button_active") if n.atl_script.strip() else tr("ne.atl_button"))
+        self.atl_btn.setToolTip(tr("ne.atl_hint"))
+        self.atl_btn.clicked.connect(lambda: self._open_atl_editor(is_bg=False))
+        g.addWidget(self.atl_btn)
+
+        hint = QLabel(tr("ne.sprite_group_hint"))
         hint.setWordWrap(True)
-        hint.setStyleSheet("color:#666; font-size:10px; padding-top:2px;")
+        hint.setObjectName("hint_text")
+        hint.setStyleSheet("padding-top:2px;")
         g.addWidget(hint)
 
         self._insert(grp)
@@ -786,11 +951,11 @@ class NodeEditor(QWidget):
 
     def _add_hide_fields(self):
         n = self.node
-        grp = QGroupBox("Скрыть спрайт")
-        grp.setStyleSheet("QGroupBox { color:#888; border:1px solid #333; border-radius:4px; margin-top:8px; padding-top:8px; }")
+        grp = QGroupBox(tr("ne.hide_sprite_group"))
+        grp.setObjectName("plain_box")
         g = QVBoxLayout(grp)
 
-        g.addWidget(_label("Скрыть персонажа целиком (клик на папку - без захода внутрь):"))
+        g.addWidget(_label(tr("ne.hide_whole_char")))
         self.hide_group_picker = CharacterGroupPicker(self.rm, category="sprites", thumb_size=160)
         self.hide_group_picker.set_resource_manager(self.rm, "sprites")
         if n.hide_group:
@@ -798,9 +963,10 @@ class NodeEditor(QWidget):
         self.hide_group_picker.selection_changed.connect(self._on_hide_group_selected)
         g.addWidget(self.hide_group_picker)
 
-        sep = QLabel("- или выбрать конкретный спрайт -")
+        sep = QLabel(tr("ne.or_pick_specific_sprite"))
         sep.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        sep.setStyleSheet("color:#666; font-size:10px; padding:4px;")
+        sep.setObjectName("hint_text")
+        sep.setStyleSheet("padding:4px;")
         g.addWidget(sep)
 
         self.hide_carousel = FolderResourceCarousel(self.rm, category="sprites", thumb_size=160)
@@ -829,105 +995,92 @@ class NodeEditor(QWidget):
 
     def _add_window_fields(self):
         n = self.node
-        grp = QGroupBox("Текстовое окно")
-        grp.setStyleSheet("QGroupBox { color:#888; border:1px solid #333; border-radius:4px; margin-top:8px; padding-top:8px; }")
+        grp = QGroupBox(tr("ne.textbox_group"))
+        grp.setObjectName("plain_box")
         g = QVBoxLayout(grp)
 
-        g.addWidget(_label("Действие:"))
+        g.addWidget(_label(tr("ne.action_label")))
         self.window_action_combo = _combo(["show", "hide"])
         self.window_action_combo.setCurrentText(n.window_action or "show")
         self.window_action_combo.currentIndexChanged.connect(lambda *_: self._apply())
         g.addWidget(self.window_action_combo)
 
-        g.addWidget(_label("Переход (необязательно):"))
+        g.addWidget(_label(tr("ne.transition_optional_label")))
         self.window_trans_combo = _transition_combo(n.transition)
         self.window_trans_combo.currentIndexChanged.connect(lambda *_: self._apply())
         g.addWidget(self.window_trans_combo)
+        window_trans_btn = QPushButton(tr("ne.transition_button"))
+        window_trans_btn.clicked.connect(lambda: self._open_transition_editor(self.window_trans_combo, ""))
+        g.addWidget(window_trans_btn)
 
         self._insert(grp)
 
     def _add_with_transition_fields(self):
         n = self.node
-        grp = QGroupBox("Эффект (with)")
-        grp.setStyleSheet("QGroupBox { color:#888; border:1px solid #333; border-radius:4px; margin-top:8px; padding-top:8px; }")
+        grp = QGroupBox(tr("ne.with_effect_group"))
+        grp.setObjectName("plain_box")
         g = QVBoxLayout(grp)
 
-        hint = QLabel(
-            "Самостоятельная инструкция \"with переход\" - применяет эффект ко "
-            "всему экрану, не привязываясь к конкретному show/scene/hide "
-            "(например, эффект тряски vpunch после реплики)."
-        )
+        hint = QLabel(tr("ne.with_effect_hint"))
         hint.setWordWrap(True)
-        hint.setStyleSheet("color:#777; font-size:11px;")
+        hint.setObjectName("hint_text")
         g.addWidget(hint)
 
-        g.addWidget(_label("Переход:"))
+        g.addWidget(_label(tr("ne.transition_label")))
         self.with_trans_combo = _transition_combo(n.transition)
         self.with_trans_combo.currentIndexChanged.connect(lambda *_: self._apply())
         g.addWidget(self.with_trans_combo)
+        with_trans_btn = QPushButton(tr("ne.transition_button"))
+        with_trans_btn.clicked.connect(lambda: self._open_transition_editor(self.with_trans_combo, ""))
+        g.addWidget(with_trans_btn)
 
         self._insert(grp)
 
     def _add_nvl_mode_fields(self):
         n = self.node
-        grp = QGroupBox("Режим NVL/ADV")
-        grp.setStyleSheet("QGroupBox { color:#888; border:1px solid #333; border-radius:4px; margin-top:8px; padding-top:8px; }")
+        grp = QGroupBox(tr("ne.nvl_mode_group"))
+        grp.setObjectName("plain_box")
         g = QVBoxLayout(grp)
 
-        hint = QLabel(
-            "Переключает стиль показа текста: ADV - обычное окно диалога внизу "
-            "экрана (по умолчанию); NVL - во весь экран, реплики накапливаются "
-            "друг под другом, как в визуальной новелле/книге. Действует на все "
-            "реплики после этой ноды, пока не встретится нода \"Вернуться в ADV\"."
-        )
+        hint = QLabel(tr("ne.nvl_mode_hint"))
         hint.setWordWrap(True)
-        hint.setStyleSheet("color:#777; font-size:11px;")
+        hint.setObjectName("hint_text")
         g.addWidget(hint)
 
-        g.addWidget(_label("Действие:"))
+        g.addWidget(_label(tr("ne.action_label")))
         self.nvl_action_combo = _combo([
-            "enter - Войти в NVL-режим",
-            "clear - Очистить экран NVL (остаться в NVL)",
-            "exit - Вернуться в ADV",
+            tr("ne.nvl_action_enter"),
+            tr("ne.nvl_action_clear"),
+            tr("ne.nvl_action_exit"),
         ])
         current_map = {"enter": 0, "clear": 1, "exit": 2}
         self.nvl_action_combo.setCurrentIndex(current_map.get(n.nvl_action, 0))
         self.nvl_action_combo.currentIndexChanged.connect(lambda *_: self._apply())
         g.addWidget(self.nvl_action_combo)
 
-        note = QLabel(
-            "В код это превращается в `nvl clear` (для «войти»/«очистить») и "
-            "переключение реплик на NVL-версию персонажа (define ..._nvl, "
-            "генерируется автоматически) либо обратно на обычную."
-        )
+        note = QLabel(tr("ne.nvl_clear_hint"))
         note.setWordWrap(True)
-        note.setStyleSheet("color:#666; font-size:10px;")
+        note.setObjectName("hint_text")
         g.addWidget(note)
 
         self._insert(grp)
+
+    def _add_raw_fields(self):
         n = self.node
-        grp = QGroupBox("Необработанный код (импортирован дословно)")
-        grp.setStyleSheet("QGroupBox { color:#888; border:1px solid #333; border-radius:4px; margin-top:8px; padding-top:8px; }")
+        grp = QGroupBox(tr("ne.raw_code_group"))
+        grp.setObjectName("plain_box")
         g = QVBoxLayout(grp)
 
-        hint = QLabel(
-            "Этот блок не удалось распознать как одну из известных команд "
-            "редактора при импорте .rpy - он сохранён дословно и будет "
-            "воспроизведён в коде в точности как есть, без изменений."
-        )
+        hint = QLabel(tr("ne.raw_code_hint"))
         hint.setWordWrap(True)
-        hint.setStyleSheet("color:#ff9955; font-size:11px;")
+        hint.setObjectName("accent_caption")
+        hint.setStyleSheet("font-size:11px; font-weight:normal;")
         g.addWidget(hint)
 
         self.raw_edit = QTextEdit()
         self.raw_edit.setPlainText(n.python_code)
         self.raw_edit.setMinimumHeight(120)
-        self.raw_edit.setStyleSheet("""
-            QTextEdit {
-                background:#1c1c22; color:#ddd; border:1px solid #444;
-                border-radius:4px; padding:4px; font-family:Consolas,monospace; font-size:11px;
-            }
-        """)
+        self.raw_edit.setObjectName("code_field")
         self.raw_edit.textChanged.connect(lambda: self._apply())
         g.addWidget(self.raw_edit)
 
@@ -935,25 +1088,23 @@ class NodeEditor(QWidget):
 
     def _add_custom_fields(self):
         n = self.node
-        grp = QGroupBox("Пользовательская нода")
-        grp.setStyleSheet("QGroupBox { color:#888; border:1px solid #333; border-radius:4px; margin-top:8px; padding-top:8px; }")
+        grp = QGroupBox(tr("ne.custom_node_group"))
+        grp.setObjectName("plain_box")
         g = QVBoxLayout(grp)
 
         self.custom_param_widgets = {}
         templates = self.custom_template_store.templates if self.custom_template_store else []
 
         if not templates:
-            empty = QLabel(
-                "Пока нет ни одного шаблона пользовательской ноды. Создайте его в "
-                "«Проект → Шаблоны пользовательских нод...», затем выберите здесь."
-            )
+            empty = QLabel(tr("ne.no_custom_templates"))
             empty.setWordWrap(True)
-            empty.setStyleSheet("color:#ff9955; font-size:11px;")
+            empty.setObjectName("accent_caption")
+            empty.setStyleSheet("font-size:11px; font-weight:normal;")
             g.addWidget(empty)
             self._insert(grp)
             return
 
-        g.addWidget(_label("Шаблон:"))
+        g.addWidget(_label(tr("ne.template_label")))
         self.custom_template_combo = _combo([t.name for t in templates])
         ids = [t.template_id for t in templates]
         if n.custom_template_id in ids:
@@ -968,7 +1119,7 @@ class NodeEditor(QWidget):
         if current and current.description:
             desc = QLabel(current.description)
             desc.setWordWrap(True)
-            desc.setStyleSheet("color:#888; font-size:11px;")
+            desc.setObjectName("hint_text")
             g.addWidget(desc)
 
         self.custom_params_box = QVBoxLayout()
@@ -1019,13 +1170,13 @@ class NodeEditor(QWidget):
     def _add_audio_fields(self, t: str):
         n = self.node
         cat = {"play_music": "music", "play_sound": "sounds", "play_ambience": "ambience"}[t]
-        title = {"play_music": "Аудио (музыка)", "play_sound": "Аудио (звук)",
-                 "play_ambience": "Аудио (эмбиенс)"}[t]
+        title = {"play_music": tr("ne.audio_music_title"), "play_sound": tr("ne.audio_sound_title"),
+                 "play_ambience": tr("ne.audio_ambience_title")}[t]
         grp = QGroupBox(title)
-        grp.setStyleSheet("QGroupBox { color:#888; border:1px solid #333; border-radius:4px; margin-top:8px; padding-top:8px; }")
+        grp.setObjectName("plain_box")
         g = QVBoxLayout(grp)
         vars_list = self.asset_vars.get(cat, [])
-        g.addWidget(_label("Файл:"))
+        g.addWidget(_label(tr("ne.file_label")))
 
         combo_row = QHBoxLayout()
         self.audio_combo = _combo(vars_list)
@@ -1036,8 +1187,8 @@ class NodeEditor(QWidget):
 
         btn_play = QPushButton("▶️")
         btn_play.setToolTip(
-            "Прослушать выбранный файл" +
-            (" (с 1/5 от начала трека)" if cat == "music" else " (с начала)")
+            tr("ne.listen_file_tooltip") +
+            (tr("ne.listen_from_fifth") if cat == "music" else tr("ne.listen_from_start"))
         )
         btn_play.setObjectName("btn_secondary")
         btn_play.setFixedWidth(48)
@@ -1045,7 +1196,7 @@ class NodeEditor(QWidget):
         combo_row.addWidget(btn_play)
 
         btn_stop = QPushButton("⏹️")
-        btn_stop.setToolTip("Остановить прослушивание")
+        btn_stop.setToolTip(tr("ne.stop_listening_tooltip"))
         btn_stop.setObjectName("btn_secondary")
         btn_stop.setFixedWidth(48)
         btn_stop.clicked.connect(lambda: get_audio_player().stop())
@@ -1054,9 +1205,9 @@ class NodeEditor(QWidget):
         g.addLayout(combo_row)
 
         if t == "play_music":
-            self.loop_check = QCheckBox("Зациклить (loop)")
+            self.loop_check = QCheckBox(tr("ne.loop_checkbox"))
             self.loop_check.setChecked(n.audio_loop)
-            self.loop_check.setStyleSheet("color:#ccc;")
+            self.loop_check.setObjectName("hint_text_bright")
             g.addWidget(self.loop_check)
 
         if t in ("play_music", "play_ambience"):
@@ -1064,27 +1215,24 @@ class NodeEditor(QWidget):
             value_fadeout = n.music_fadeout if t == "play_music" else n.ambience_fadeout
 
             fade_row = QHBoxLayout()
-            fade_row.addWidget(_label("Fade in (сек):"))
+            fade_row.addWidget(_label(tr("ne.fadein_sec_label")))
             self.fadein_spin = QDoubleSpinBox()
             self.fadein_spin.setRange(0.0, 60.0)
             self.fadein_spin.setSingleStep(0.5)
             self.fadein_spin.setDecimals(1)
             self.fadein_spin.setValue(value_fadein)
-            self.fadein_spin.setToolTip("Плавное нарастание громкости в начале (fadein N)")
+            self.fadein_spin.setToolTip(tr("ne.fadein_tooltip"))
             self.fadein_spin.valueChanged.connect(self._on_fadein_spin_changed)
             fade_row.addWidget(self.fadein_spin)
 
             fade_row.addSpacing(12)
-            fade_row.addWidget(_label("Fade out (сек):"))
+            fade_row.addWidget(_label(tr("ne.fadeout_sec_label")))
             self.fadeout_spin = QDoubleSpinBox()
             self.fadeout_spin.setRange(0.0, 60.0)
             self.fadeout_spin.setSingleStep(0.5)
             self.fadeout_spin.setDecimals(1)
             self.fadeout_spin.setValue(value_fadeout)
-            self.fadeout_spin.setToolTip(
-                "Плавное затухание в конце трека (для музыки - если она доиграет "
-                "до конца сама, не оборвётся раньше через stop music)"
-            )
+            self.fadeout_spin.setToolTip(tr("ne.fadeout_tooltip"))
             self.fadeout_spin.valueChanged.connect(self._on_fadeout_spin_changed)
             fade_row.addWidget(self.fadeout_spin)
             fade_row.addStretch()
@@ -1093,7 +1241,7 @@ class NodeEditor(QWidget):
                                                                                 
             self.ambience_fadeout_spin = self.fadeout_spin
 
-        g.addWidget(_label("Волна (клик - перемотка, перетаскивание маркеров - fadein/fadeout):"))
+        g.addWidget(_label(tr("ne.waveform_label")))
         self.waveform = WaveformWidget()
         g.addWidget(self.waveform)
         self._wire_waveform(t, n)
@@ -1197,9 +1345,9 @@ class NodeEditor(QWidget):
     def _add_stop_audio_fields(self, t: str):
         """stop_music / stop_ambience - только канал и опциональный fadeout."""
         n = self.node
-        title = "Стоп музыка" if t == "stop_music" else "Стоп эмбиенс"
+        title = tr("ne.stop_music_title") if t == "stop_music" else tr("ne.stop_ambience_title")
         grp = QGroupBox(title)
-        grp.setStyleSheet("QGroupBox { color:#888; border:1px solid #333; border-radius:4px; margin-top:8px; padding-top:8px; }")
+        grp.setObjectName("plain_box")
         g = QVBoxLayout(grp)
 
         fadeout_row = QHBoxLayout()
@@ -1230,10 +1378,10 @@ class NodeEditor(QWidget):
 
     def _add_label_fields(self):
         n = self.node
-        grp = QGroupBox("Метка")
-        grp.setStyleSheet("QGroupBox { color:#888; border:1px solid #333; border-radius:4px; margin-top:8px; padding-top:8px; }")
+        grp = QGroupBox(tr("ne.label_group"))
+        grp.setObjectName("plain_box")
         g = QVBoxLayout(grp)
-        g.addWidget(_label("Имя метки:"))
+        g.addWidget(_label(tr("ne.label_name_field")))
         self.label_edit = _field("start, intro_scene, ...")
         self.label_edit.setText(n.label_name)
         g.addWidget(self.label_edit)
@@ -1241,28 +1389,28 @@ class NodeEditor(QWidget):
 
     def _add_jump_fields(self):
         n = self.node
-        grp = QGroupBox("Переход")
-        grp.setStyleSheet("QGroupBox { color:#888; border:1px solid #333; border-radius:4px; margin-top:8px; padding-top:8px; }")
+        grp = QGroupBox(tr("ne.jump_group"))
+        grp.setObjectName("plain_box")
         g = QVBoxLayout(grp)
-        g.addWidget(_label("Цель перехода:"))
-        self.jump_edit = _field("имя метки")
-        self.jump_edit.setToolTip("Имя label, на которую нужно перейти (jump). Должна существовать где-то в сценарии - иначе Ren'Py выдаст ошибку при запуске игры.")
+        g.addWidget(_label(tr("ne.jump_target_label")))
+        self.jump_edit = _field(tr("ne.label_name_placeholder"))
+        self.jump_edit.setToolTip(tr("ne.jump_target_tooltip"))
         self.jump_edit.setText(n.jump_target)
         g.addWidget(self.jump_edit)
         self._insert(grp)
 
     def _add_menu_fields(self):
         n = self.node
-        grp = QGroupBox("Меню выбора")
-        grp.setStyleSheet("QGroupBox { color:#888; border:1px solid #333; border-radius:4px; margin-top:8px; padding-top:8px; }")
+        grp = QGroupBox(tr("ne.menu_group"))
+        grp.setObjectName("plain_box")
         g = QVBoxLayout(grp)
-        g.addWidget(_label("Вопрос/фраза перед меню:"))
-        self.menu_q = _field("Необязательно")
+        g.addWidget(_label(tr("ne.menu_question_label")))
+        self.menu_q = _field(tr("ne.optional_placeholder"))
         self.menu_q.setText(n.menu_question)
         self.menu_q.textChanged.connect(lambda *_: self._apply())
         g.addWidget(self.menu_q)
 
-        g.addWidget(_label("Варианты ответов:"))
+        g.addWidget(_label(tr("ne.menu_options_label")))
         self.choices_container = QWidget()
         self.choices_layout = QVBoxLayout(self.choices_container)
         self.choices_layout.setContentsMargins(0, 0, 0, 0)
@@ -1271,18 +1419,17 @@ class NodeEditor(QWidget):
             self._add_choice_row(text, jump, use_call, raw_body, nodes)
         g.addWidget(self.choices_container)
 
-        add_btn = QPushButton("+ Добавить вариант")
-        add_btn.setStyleSheet("QPushButton { background:#333; color:#ff8c3d; border-radius:4px; padding:4px; }")
+        add_btn = QPushButton(tr("ne.add_choice_button"))
+        add_btn.setObjectName("node_action_btn")
         add_btn.clicked.connect(lambda: self._add_choice_row())
         g.addWidget(add_btn)
 
         info = QLabel(
-            "По умолчанию переход на метку - jump. Включайте «call» у варианта, "
-            "если после return в этой метке игрок должен вернуться обратно в меню, "
-            "а не вылететь в главное меню (так ведёт себя jump + return)."
+            tr("ne.menu_call_hint")
         )
         info.setWordWrap(True)
-        info.setStyleSheet("color:#666; font-size:10px; padding-top:4px;")
+        info.setObjectName("hint_text")
+        info.setStyleSheet("padding-top:4px;")
         g.addWidget(info)
 
         self._insert(grp)
@@ -1310,57 +1457,52 @@ class NodeEditor(QWidget):
     def _add_python_fields(self):
         n = self.node
         grp = QGroupBox("Python код ($ prefix)")
-        grp.setStyleSheet("QGroupBox { color:#888; border:1px solid #333; border-radius:4px; margin-top:8px; padding-top:8px; }")
+        grp.setObjectName("plain_box")
         g = QVBoxLayout(grp)
         self.py_edit = QTextEdit()
         self.py_edit.setPlaceholderText("score += 1\nflag = True")
         self.py_edit.setText(n.python_code)
         self.py_edit.setMinimumHeight(100)
-        self.py_edit.setStyleSheet("""
-            QTextEdit {
-                background:#1a1a2e; color:#7ec8e3; border:1px solid #444;
-                font-family:monospace; font-size:12px; border-radius:4px; padding:4px;
-            }
+        t = theme_manager.tokens()
+        self.py_edit.setStyleSheet(f"""
+            QTextEdit {{
+                background:{t.base_field}; color:#7ec8e3; border:1px solid {t.glass_border_s};
+                font-family:Consolas,monospace; font-size:12px; border-radius:4px; padding:4px;
+            }}
         """)
         g.addWidget(self.py_edit)
         self._insert(grp)
 
     def _add_pause_fields(self):
         n = self.node
-        grp = QGroupBox("Пауза")
-        grp.setStyleSheet("QGroupBox { color:#888; border:1px solid #333; border-radius:4px; margin-top:8px; padding-top:8px; }")
+        grp = QGroupBox(tr("ne.pause_group"))
+        grp.setObjectName("plain_box")
         g = QVBoxLayout(grp)
-        g.addWidget(_label("Длительность в секундах (0 - ждать клика игрока):"))
+        g.addWidget(_label(tr("ne.pause_duration_label")))
         self.pause_spin = QDoubleSpinBox()
-        self.pause_spin.setToolTip("Длительность паузы в секундах. 0 - пауза до клика игрока (эквивалент голой команды pause).")
+        self.pause_spin.setToolTip(tr("ne.pause_duration_tooltip"))
         self.pause_spin.setRange(0.0, 600.0)
         self.pause_spin.setSingleStep(0.5)
         self.pause_spin.setDecimals(1)
         self.pause_spin.setValue(n.pause_duration)
-        self.pause_spin.setStyleSheet("QDoubleSpinBox { background:#2a2a2a; color:#fff; border:1px solid #444; border-radius:4px; padding:4px; }")
+        self.pause_spin.setObjectName("dark_field")
         self.pause_spin.valueChanged.connect(lambda *_: self._apply())
         g.addWidget(self.pause_spin)
-        hint = QLabel("0 секунд - pause без числа: сцена ждёт клика игрока, "
-                       "как обычная реплика без текста. Больше 0 - pause N: "
-                       "ждёт указанное время и продолжает само.")
+        hint = QLabel(tr("ne.pause_hint"))
         hint.setWordWrap(True)
-        hint.setStyleSheet("color:#666; font-size:10px; padding-top:2px;")
+        hint.setObjectName("hint_text")
+        hint.setStyleSheet("padding-top:2px;")
         g.addWidget(hint)
         self._insert(grp)
 
     def _add_return_fields(self):
         grp = QGroupBox("Return")
-        grp.setStyleSheet("QGroupBox { color:#888; border:1px solid #333; border-radius:4px; margin-top:8px; padding-top:8px; }")
+        grp.setObjectName("plain_box")
         g = QVBoxLayout(grp)
-        hint = QLabel(
-            "Эта нода просто вставляет return в сценарий, без параметров.\n\n"
-            "Если до этого места дошли через jump - Ren'Py решит, что сценарий "
-            "закончился, и игра выйдет в главное меню.\n"
-            "Если дошли через call (например, из варианта меню с галочкой "
-            "«call») - игра вернётся обратно сразу после места вызова."
-        )
+        hint = QLabel(tr("ne.return_hint"))
         hint.setWordWrap(True)
-        hint.setStyleSheet("color:#999; font-size:11px; padding:4px;")
+        hint.setObjectName("hint_text")
+        hint.setStyleSheet("padding:4px;")
         g.addWidget(hint)
         self._insert(grp)
 

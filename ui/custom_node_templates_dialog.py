@@ -14,6 +14,7 @@ from core.custom_node_templates import (
     CustomNodeTemplateStore, CustomNodeTemplate, ParamDef,
     PARAM_TYPES, PARAM_TYPE_LABELS, JINJA2_AVAILABLE,
 )
+from core.i18n import tr
 
 DOC_TEXT = """
 <h2>Шаблоны пользовательских нод</h2>
@@ -76,13 +77,13 @@ class ParamRow(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
 
         self.name_edit = QLineEdit(param.name)
-        self.name_edit.setPlaceholderText("имя_параметра")
+        self.name_edit.setPlaceholderText(tr("custom_nodes.name_param_placeholder"))
         self.name_edit.setFixedWidth(140)
         self.name_edit.textChanged.connect(on_change)
         layout.addWidget(self.name_edit)
 
         self.label_edit = QLineEdit(param.label)
-        self.label_edit.setPlaceholderText("Подпись в форме")
+        self.label_edit.setPlaceholderText(tr("custom_nodes.label_in_form_placeholder"))
         self.label_edit.textChanged.connect(on_change)
         layout.addWidget(self.label_edit)
 
@@ -95,7 +96,7 @@ class ParamRow(QWidget):
         layout.addWidget(self.type_combo)
 
         self.default_edit = QLineEdit(str(param.default))
-        self.default_edit.setPlaceholderText("значение по умолчанию")
+        self.default_edit.setPlaceholderText(tr("custom_nodes.default_value_placeholder"))
         self.default_edit.textChanged.connect(on_change)
         layout.addWidget(self.default_edit)
 
@@ -122,7 +123,7 @@ class CustomNodeTemplatesDialog(QDialog):
         self.base_dir = base_dir
         self.current: CustomNodeTemplate = None
         self.param_rows = []
-        self.setWindowTitle("Шаблоны пользовательских нод")
+        self.setWindowTitle(tr("custom_nodes.title"))
         self.setMinimumSize(880, 620)
         self._setup_ui()
         self._reload_list()
@@ -133,11 +134,11 @@ class CustomNodeTemplatesDialog(QDialog):
         outer.addWidget(tabs, 1)
 
         editor_tab = QWidget()
-        tabs.addTab(editor_tab, "Шаблоны")
+        tabs.addTab(editor_tab, tr("custom_nodes.tab_templates"))
         self._setup_editor_tab(editor_tab)
 
         help_tab = QWidget()
-        tabs.addTab(help_tab, "📖 Справка")
+        tabs.addTab(help_tab, tr("custom_nodes.tab_help"))
         help_layout = QVBoxLayout(help_tab)
         help_scroll = QScrollArea()
         help_scroll.setWidgetResizable(True)
@@ -150,7 +151,7 @@ class CustomNodeTemplatesDialog(QDialog):
 
         bottom = QHBoxLayout()
         bottom.addStretch()
-        btn_close = QPushButton("Закрыть")
+        btn_close = QPushButton(tr("custom_nodes.close"))
         btn_close.clicked.connect(self.accept)
         bottom.addWidget(btn_close)
         outer.addLayout(bottom)
@@ -159,27 +160,25 @@ class CustomNodeTemplatesDialog(QDialog):
         layout = QVBoxLayout(tab)
 
         if not JINJA2_AVAILABLE:
-            warn = QLabel(
-                "⚠ Пакет jinja2 не установлен - шаблоны сохранятся, но НЕ будут "
-                "применяться при генерации кода (pip install jinja2)."
-            )
+            warn = QLabel(tr("custom_nodes.no_jinja2"))
             warn.setWordWrap(True)
-            warn.setStyleSheet("color:#ffb84d; background:#332a1a; padding:6px; border-radius:4px;")
+            warn.setObjectName("warning_banner")
+            warn.setStyleSheet("padding:6px;")
             layout.addWidget(warn)
 
         split = QSplitter(Qt.Orientation.Horizontal)
 
         left = QWidget()
         left_l = QVBoxLayout(left)
-        left_l.addWidget(QLabel("Шаблоны:"))
+        left_l.addWidget(QLabel(tr("custom_nodes.templates_label")))
         self.list_widget = QListWidget()
         self.list_widget.currentRowChanged.connect(self._on_select)
         left_l.addWidget(self.list_widget, 1)
         list_btns = QHBoxLayout()
-        btn_add = QPushButton("+ Новый")
+        btn_add = QPushButton(tr("custom_nodes.new"))
         btn_add.clicked.connect(self._add_template)
         list_btns.addWidget(btn_add)
-        btn_del = QPushButton("Удалить")
+        btn_del = QPushButton(tr("custom_nodes.delete"))
         btn_del.clicked.connect(self._delete_template)
         list_btns.addWidget(btn_del)
         left_l.addLayout(list_btns)
@@ -188,35 +187,36 @@ class CustomNodeTemplatesDialog(QDialog):
         right_l = QVBoxLayout(right)
 
         name_row = QHBoxLayout()
-        name_row.addWidget(QLabel("Название:"))
+        name_row.addWidget(QLabel(tr("custom_nodes.name_label")))
         self.name_edit = QLineEdit()
         self.name_edit.textChanged.connect(self._on_field_changed)
         name_row.addWidget(self.name_edit)
         right_l.addLayout(name_row)
 
-        right_l.addWidget(QLabel("Описание (подсказка в форме ноды):"))
+        right_l.addWidget(QLabel(tr("custom_nodes.desc_label")))
         self.desc_edit = QLineEdit()
         self.desc_edit.textChanged.connect(self._on_field_changed)
         right_l.addWidget(self.desc_edit)
 
-        right_l.addWidget(QLabel("Параметры:"))
+        right_l.addWidget(QLabel(tr("custom_nodes.params_label")))
         self.params_container = QVBoxLayout()
         right_l.addLayout(self.params_container)
-        btn_add_param = QPushButton("+ Добавить параметр")
+        btn_add_param = QPushButton(tr("custom_nodes.add_param"))
         btn_add_param.clicked.connect(self._add_param_row)
         right_l.addWidget(btn_add_param)
 
-        right_l.addWidget(QLabel("Jinja2-шаблон кода:"))
+        right_l.addWidget(QLabel(tr("custom_nodes.jinja_template_label")))
         self.code_edit = QTextEdit()
         self.code_edit.setStyleSheet("font-family: monospace; font-size:12px;")
         self.code_edit.textChanged.connect(self._on_field_changed)
         right_l.addWidget(self.code_edit)
 
-        right_l.addWidget(QLabel("Предпросмотр (с значениями по умолчанию):"))
+        right_l.addWidget(QLabel(tr("custom_nodes.preview_label")))
         self.preview_edit = QTextEdit()
         self.preview_edit.setReadOnly(True)
         self.preview_edit.setMaximumHeight(90)
-        self.preview_edit.setStyleSheet("font-family: monospace; font-size:12px; background:#1a1a21;")
+        self.preview_edit.setObjectName("code_box")
+        self.preview_edit.setStyleSheet("font-size:12px;")
         right_l.addWidget(self.preview_edit)
 
         split.addWidget(left)
@@ -243,7 +243,7 @@ class CustomNodeTemplatesDialog(QDialog):
             self._set_editor_enabled(False)
 
     def _add_template(self):
-        t = CustomNodeTemplate(name=f"Новый шаблон {len(self.store.templates) + 1}")
+        t = CustomNodeTemplate(name=tr("custom_nodes.new_template_name", n=len(self.store.templates) + 1))
         self.store.add(t)
         self._reload_list()
         self.list_widget.setCurrentRow(len(self.store.templates) - 1)
@@ -253,8 +253,8 @@ class CustomNodeTemplatesDialog(QDialog):
         if self.current is None:
             return
         confirm = QMessageBox.question(
-            self, "Удалить шаблон?", f"Удалить шаблон «{self.current.name}»? "
-            f"Уже вставленные ноды этого типа не удалятся, но перестанут находить шаблон.",
+            self, tr("custom_nodes.delete_template_title"),
+            tr("custom_nodes.delete_template_confirm", name=self.current.name),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if confirm != QMessageBox.StandardButton.Yes:

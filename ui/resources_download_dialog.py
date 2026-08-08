@@ -5,6 +5,8 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QUrl
 from PyQt6.QtGui import QDesktopServices
 
+from core.i18n import tr
+
 RESOURCES_URL = "https://disk.yandex.ru/d/OeMHgq8TVvvyug"
 
 
@@ -14,7 +16,7 @@ class ResourcesDownloadDialog(QDialog):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Ресурсы для модификаций")
+        self.setWindowTitle(tr("res_download.title"))
         self.resize(480, 220)
         self._setup_ui()
 
@@ -22,16 +24,16 @@ class ResourcesDownloadDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.setSpacing(14)
 
-        title = QLabel("Ресурсы, необходимые для создания модификаций")
-        title.setStyleSheet("font-size: 14px; font-weight: bold; color: #ff8c3d;")
+        title = QLabel(tr("res_download.heading"))
+        title.setObjectName("accent_caption")
+        title.setStyleSheet("font-size:14px;")
         title.setWordWrap(True)
         layout.addWidget(title)
 
-        info = QLabel(
-            "Архив скачать и распаковать в папку, где лежит .exe."
-        )
+        info = QLabel(tr("res_download.info"))
         info.setWordWrap(True)
-        info.setStyleSheet("color: #ccc; font-size: 12px;")
+        info.setObjectName("hint_text_bright")
+        info.setStyleSheet("font-size:12px;")
         layout.addWidget(info)
 
         link_row = QHBoxLayout()
@@ -43,7 +45,7 @@ class ResourcesDownloadDialog(QDialog):
         layout.addLayout(link_row)
 
         btn_row = QHBoxLayout()
-        open_btn = QPushButton("🔗 Открыть ссылку в браузере")
+        open_btn = QPushButton(tr("res_download.open_link"))
         open_btn.clicked.connect(self._open_link)
         btn_row.addWidget(open_btn)
         layout.addLayout(btn_row)

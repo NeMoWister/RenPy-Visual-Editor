@@ -16,19 +16,20 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import pyqtSignal
 
 from core.tags_store import TagsStore
+from core.i18n import tr
 
 
 class TagPickerDialog(QDialog):
     """Выбор тегов для ОДНОГО ресурса (фона/CG) - чекбоксы, сгруппированные
     по категориям. Если категорий ещё нет, подсказывает создать их через
-    TagsManagerDialog."""
+    TagsManagerDialog."""        
 
     def __init__(self, tags_store: TagsStore, base_dir: str, var_name: str, display_name: str, parent=None):
         super().__init__(parent)
         self.store = tags_store
         self.base_dir = base_dir
         self.var_name = var_name
-        self.setWindowTitle(f"Теги: {display_name}")
+        self.setWindowTitle(tr("tags.picker_title", name=display_name))
         self.setMinimumSize(360, 420)
         self._checkboxes = []                    
         self._setup_ui()
@@ -37,12 +38,9 @@ class TagPickerDialog(QDialog):
         layout = QVBoxLayout(self)
 
         if not self.store.categories:
-            lbl = QLabel(
-                "Категорий тегов пока нет. Создайте их через "
-                "«Проект → Категории тегов...», затем вернитесь сюда."
-            )
+            lbl = QLabel(tr("tags.no_categories"))
             lbl.setWordWrap(True)
-            lbl.setStyleSheet("color:#999;")
+            lbl.setObjectName("hint_text")
             layout.addWidget(lbl)
         else:
             scroll = QScrollArea()
@@ -55,8 +53,8 @@ class TagPickerDialog(QDialog):
                 grp = QGroupBox(cat.name)
                 gl = QVBoxLayout(grp)
                 if not cat.tags:
-                    empty = QLabel("(нет тегов в этой категории)")
-                    empty.setStyleSheet("color:#777; font-size:11px;")
+                    empty = QLabel(tr("tags.no_tags_in_category"))
+                    empty.setObjectName("hint_text")
                     gl.addWidget(empty)
                 for tag in cat.tags:
                     key = f"{cat.id}:{tag}"
@@ -70,12 +68,12 @@ class TagPickerDialog(QDialog):
             layout.addWidget(scroll, 1)
 
         btn_row = QHBoxLayout()
-        btn_cancel = QPushButton("Отмена")
+        btn_cancel = QPushButton(tr("tags.cancel"))
         btn_cancel.setObjectName("btn_secondary")
         btn_cancel.clicked.connect(self.reject)
         btn_row.addWidget(btn_cancel)
         btn_row.addStretch()
-        btn_ok = QPushButton("Сохранить")
+        btn_ok = QPushButton(tr("tags.save"))
         btn_ok.clicked.connect(self._on_ok)
         btn_row.addWidget(btn_ok)
         layout.addLayout(btn_row)
@@ -94,7 +92,7 @@ class TagsManagerDialog(QDialog):
         super().__init__(parent)
         self.store = tags_store
         self.base_dir = base_dir
-        self.setWindowTitle("Категории тегов (для фонов и CG)")
+        self.setWindowTitle(tr("tags.manager_title"))
         self.setMinimumSize(560, 420)
         self._setup_ui()
         self._reload_categories()
@@ -102,27 +100,23 @@ class TagsManagerDialog(QDialog):
     def _setup_ui(self):
         layout = QVBoxLayout(self)
 
-        hint = QLabel(
-            "Создайте категорию (например, «Локация» или «Время суток»), а внутри "
-            "неё - теги («пляж», «лес», «день», «ночь»). У одного фона/CG может "
-            "быть сразу несколько тегов из разных категорий."
-        )
+        hint = QLabel(tr("tags.manager_hint"))
         hint.setWordWrap(True)
-        hint.setStyleSheet("color:#999; font-size:11px;")
+        hint.setObjectName("hint_text")
         layout.addWidget(hint)
 
         columns = QHBoxLayout()
 
                                         
         left = QVBoxLayout()
-        left.addWidget(QLabel("Категории:"))
+        left.addWidget(QLabel(tr("tags.categories_label")))
         self.cat_list = QListWidget()
         self.cat_list.currentItemChanged.connect(self._on_category_selected)
         left.addWidget(self.cat_list)
 
         cat_btn_row = QHBoxLayout()
         self.new_cat_edit = QLineEdit()
-        self.new_cat_edit.setPlaceholderText("Новая категория...")
+        self.new_cat_edit.setPlaceholderText(tr("tags.new_category_placeholder"))
         self.new_cat_edit.returnPressed.connect(self._add_category)
         cat_btn_row.addWidget(self.new_cat_edit)
         btn_add_cat = QPushButton("+")
@@ -132,11 +126,11 @@ class TagsManagerDialog(QDialog):
         left.addLayout(cat_btn_row)
 
         cat_actions_row = QHBoxLayout()
-        btn_rename_cat = QPushButton("✎ Переименовать")
+        btn_rename_cat = QPushButton(tr("tags.rename"))
         btn_rename_cat.setObjectName("btn_secondary")
         btn_rename_cat.clicked.connect(self._rename_category)
         cat_actions_row.addWidget(btn_rename_cat)
-        btn_del_cat = QPushButton("✕ Удалить")
+        btn_del_cat = QPushButton(tr("tags.delete"))
         btn_del_cat.clicked.connect(self._delete_category)
         cat_actions_row.addWidget(btn_del_cat)
         left.addLayout(cat_actions_row)
@@ -145,13 +139,13 @@ class TagsManagerDialog(QDialog):
 
                                                         
         right = QVBoxLayout()
-        right.addWidget(QLabel("Теги в категории:"))
+        right.addWidget(QLabel(tr("tags.tags_in_category_label")))
         self.tag_list = QListWidget()
         right.addWidget(self.tag_list)
 
         tag_btn_row = QHBoxLayout()
         self.new_tag_edit = QLineEdit()
-        self.new_tag_edit.setPlaceholderText("Новый тег...")
+        self.new_tag_edit.setPlaceholderText(tr("tags.new_tag_placeholder"))
         self.new_tag_edit.returnPressed.connect(self._add_tag)
         tag_btn_row.addWidget(self.new_tag_edit)
         btn_add_tag = QPushButton("+")
@@ -160,14 +154,14 @@ class TagsManagerDialog(QDialog):
         tag_btn_row.addWidget(btn_add_tag)
         right.addLayout(tag_btn_row)
 
-        btn_del_tag = QPushButton("✕ Удалить тег")
+        btn_del_tag = QPushButton(tr("tags.delete_tag"))
         btn_del_tag.clicked.connect(self._delete_tag)
         right.addWidget(btn_del_tag)
 
         columns.addLayout(right, 1)
         layout.addLayout(columns)
 
-        btn_close = QPushButton("Закрыть")
+        btn_close = QPushButton(tr("tags.close"))
         btn_close.clicked.connect(self.accept)
         layout.addWidget(btn_close)
 
@@ -198,7 +192,7 @@ class TagsManagerDialog(QDialog):
         if not cat_id:
             return
         cat = self.store.get_category(cat_id)
-        new_name, ok = QInputDialog.getText(self, "Переименовать категорию", "Новое имя:", text=cat.name)
+        new_name, ok = QInputDialog.getText(self, tr("tags.rename_category_title"), tr("tags.new_name_label"), text=cat.name)
         if ok and new_name.strip():
             self.store.rename_category(cat_id, new_name.strip())
             self._save_and_refresh()
@@ -209,9 +203,8 @@ class TagsManagerDialog(QDialog):
             return
         cat = self.store.get_category(cat_id)
         reply = QMessageBox.question(
-            self, "Удалить категорию",
-            f"Удалить категорию «{cat.name}» и все её теги? Теги будут сняты со всех "
-            f"ресурсов, которым они были назначены."
+            self, tr("tags.delete_category_title"),
+            tr("tags.delete_category_confirm", name=cat.name)
         )
         if reply == QMessageBox.StandardButton.Yes:
             self.store.remove_category(cat_id)

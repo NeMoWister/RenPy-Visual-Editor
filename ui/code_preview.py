@@ -6,6 +6,8 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtGui import QFont, QSyntaxHighlighter, QTextCharFormat, QColor
 from PyQt6.QtCore import QRegularExpression, Qt
 
+from core.i18n import tr
+
 
 class RenPyHighlighter(QSyntaxHighlighter):
     def __init__(self, document):
@@ -38,12 +40,12 @@ class RenPyHighlighter(QSyntaxHighlighter):
 class CodePreviewDialog(QDialog):
     def __init__(self, full_code: str, defines_code: str = "", parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Сгенерированный код Ren'Py")
+        self.setWindowTitle(tr("code_preview.title"))
         self.setMinimumSize(800, 600)
         layout = QVBoxLayout(self)
 
         font_row = QHBoxLayout()
-        font_row.addWidget(QLabel("Размер шрифта:"))
+        font_row.addWidget(QLabel(tr("code_preview.font_size")))
         self.font_slider = QSlider(Qt.Orientation.Horizontal)
         self.font_slider.setRange(8, 24)
         self.font_slider.setValue(11)
@@ -61,20 +63,20 @@ class CodePreviewDialog(QDialog):
         self.full_editor.setFont(QFont("Courier New", 11))
         self.full_editor.setPlainText(full_code)
         RenPyHighlighter(self.full_editor.document())
-        tabs.addTab(self.full_editor, "Полный сценарий (.rpy)")
+        tabs.addTab(self.full_editor, tr("code_preview.tab_full"))
         if defines_code:
             self.def_editor = QPlainTextEdit()
             self.def_editor.setFont(QFont("Courier New", 11))
             self.def_editor.setPlainText(defines_code)
             RenPyHighlighter(self.def_editor.document())
-            tabs.addTab(self.def_editor, "Defines / Characters")
+            tabs.addTab(self.def_editor, tr("code_preview.tab_defines"))
         layout.addWidget(tabs)
         btn_row = QHBoxLayout()
-        btn_copy = QPushButton("📋 Копировать")
+        btn_copy = QPushButton(tr("code_preview.copy"))
         btn_copy.clicked.connect(self._copy)
-        btn_save = QPushButton("💾 Сохранить .rpy")
+        btn_save = QPushButton(tr("code_preview.save"))
         btn_save.clicked.connect(self._save)
-        btn_close = QPushButton("Закрыть")
+        btn_close = QPushButton(tr("code_preview.close"))
         btn_close.setObjectName("btn_secondary")
         btn_close.clicked.connect(self.accept)
         btn_row.addWidget(btn_copy)
@@ -92,14 +94,14 @@ class CodePreviewDialog(QDialog):
     def _copy(self):
         from PyQt6.QtWidgets import QApplication
         QApplication.clipboard().setText(self.full_editor.toPlainText())
-        QMessageBox.information(self, "Скопировано", "Код скопирован в буфер обмена")
+        QMessageBox.information(self, tr("code_preview.copied_title"), tr("code_preview.copied_text"))
 
     def _save(self):
-        path, _ = QFileDialog.getSaveFileName(self, "Сохранить .rpy", "script.rpy", "Ren'Py Script (*.rpy);;Все файлы (*)")
+        path, _ = QFileDialog.getSaveFileName(self, tr("code_preview.save_dialog_title"), "script.rpy", f"Ren'Py Script (*.rpy);;{tr('code_preview.all_files')} (*)")
         if path:
             try:
                 with open(path, 'w', encoding='utf-8') as f:
                     f.write(self.full_editor.toPlainText())
-                QMessageBox.information(self, "Готово", f"Файл сохранён:\n{path}")
+                QMessageBox.information(self, tr("code_preview.done_title"), tr("code_preview.saved_text", path=path))
             except Exception as e:
-                QMessageBox.critical(self, "Ошибка", str(e))
+                QMessageBox.critical(self, tr("code_preview.error_title"), str(e))

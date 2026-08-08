@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import (
 )
 
 from core.updater import check_for_update, APP_VERSION
+from core.i18n import tr
 
 
 class UpdateCheckThread(QThread):
@@ -42,7 +43,7 @@ class UpdateAvailableDialog(QDialog):
         super().__init__(parent)
         self.release = release
         self.disable_autocheck = False
-        self.setWindowTitle("Доступно обновление")
+        self.setWindowTitle(tr("update.title"))
         self.setMinimumSize(460, 320)
         self._setup_ui()
 
@@ -50,32 +51,33 @@ class UpdateAvailableDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.setSpacing(12)
 
-        title = QLabel(f"Вышла новая версия: {self.release.get('version', '?')}")
-        title.setStyleSheet("font-size:15px; font-weight:bold; color:#ff8c3d;")
+        title = QLabel(tr("update.new_version", version=self.release.get('version', '?')))
+        title.setObjectName("accent_caption")
+        title.setStyleSheet("font-size:15px;")
         layout.addWidget(title)
 
-        current = QLabel(f"Текущая версия: {APP_VERSION}")
-        current.setStyleSheet("color:#aaa; font-size:11px;")
+        current = QLabel(tr("update.current_version", version=APP_VERSION))
+        current.setObjectName("hint_text")
         layout.addWidget(current)
 
-        notes = self.release.get("notes") or "(описание изменений не указано)"
+        notes = self.release.get("notes") or tr("update.no_notes")
         notes_edit = QTextEdit()
         notes_edit.setReadOnly(True)
         notes_edit.setPlainText(notes)
-        notes_edit.setStyleSheet("background:#1c1c22; color:#ddd; border:1px solid #3a3a46;")
+        notes_edit.setObjectName("code_box")
         layout.addWidget(notes_edit, 1)
 
-        self.disable_check = QCheckBox("Не проверять обновления автоматически при запуске")
-        self.disable_check.setStyleSheet("color:#ccc;")
+        self.disable_check = QCheckBox(tr("update.disable_autocheck"))
+        self.disable_check.setObjectName("hint_text_bright")
         layout.addWidget(self.disable_check)
 
         btn_row = QHBoxLayout()
-        btn_later = QPushButton("Напомнить позже")
+        btn_later = QPushButton(tr("update.later"))
         btn_later.setObjectName("btn_secondary")
         btn_later.clicked.connect(self._on_later)
         btn_row.addWidget(btn_later)
         btn_row.addStretch()
-        btn_download = QPushButton("⬇ Скачать обновление")
+        btn_download = QPushButton(tr("update.download"))
         btn_download.clicked.connect(self._on_download)
         btn_row.addWidget(btn_download)
         layout.addLayout(btn_row)

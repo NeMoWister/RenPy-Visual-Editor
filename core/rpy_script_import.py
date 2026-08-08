@@ -49,6 +49,7 @@ from typing import List, Optional, Tuple
 from core.models import (
     SceneNode, NodeType, Scene, SpritePosition, NAMED_SPRITE_POSITIONS
 )
+from core import atl as atl_engine
 
                                                                               
 
@@ -74,12 +75,11 @@ def _unquote(s: str) -> str:
     return s
 
 
-_TRANSITION_RE = re.compile(r'\bwith\s+(\w+)\s*$')
+_TRANSITION_RE = re.compile(r'\bwith\s+(.+)$')
 _AT_RE = re.compile(r'\bat\s+(\w+)\s*$')
 _FADE_RE = re.compile(r'fadein\s+([\d.]+)')
 _FADEOUT_RE = re.compile(r'fadeout\s+([\d.]+)')
-_STANDALONE_WITH_RE = re.compile(r'^with\s+(\w+)\s*$')
-_ATL_LINE_RE = re.compile(r'^(xalign|yalign|zoom)\s+([\d.]+)\s*$')
+_STANDALONE_WITH_RE = re.compile(r'^with\s+(.+)$')
 
                                                                            
                                                    
@@ -94,7 +94,7 @@ def _parse_with(tail: str) -> Tuple[str, str]:
     той же строке, что и сама команда."""
     m = _TRANSITION_RE.search(tail)
     if m:
-        return tail[:m.start()].strip(), m.group(1)
+        return tail[:m.start()].strip(), m.group(1).strip()
     return tail.strip(), ""
 
 
@@ -445,7 +445,6 @@ class RpyScriptParser:
             block_end = self._block_end(block_start, tok.indent)
 
         block_tokens = tokens[block_start:block_end]
-        is_simple_atl = all(_ATL_LINE_RE.match(t.stripped) for t in block_tokens) if block_tokens else True
 
         end_index = block_end
         trailing_with_consumed = False
@@ -464,23 +463,25 @@ class RpyScriptParser:
                 end_index += 1
                 trailing_with_consumed = True
 
-        if has_colon and not is_simple_atl:
-            lines = _dedent_block(tokens, i, end_index, tok.indent)
-            self._report.unrecognized.append((tok.lineno, tok.stripped))
-            self._add(SceneNode(node_type=NodeType.RAW, python_code='\n'.join(lines)))
-            return end_index
-
-        for bt in block_tokens:
-            am = _ATL_LINE_RE.match(bt.stripped)
-            if am:
-                pos = pos or SpritePosition(0.5, 1.0)
-                val = float(am.group(2))
-                if am.group(1) == 'xalign':
-                    pos.xalign = val
-                elif am.group(1) == 'yalign':
-                    pos.yalign = val
-                else:
-                    pos.zoom = val
+                                                                              
+                                                                             
+                                                                              
+                                                                            
+                                                                              
+                                                                            
+                                                                             
+                                                                            
+                                                                             
+        atl_script = ""
+        if block_tokens:
+            body_base_indent = block_tokens[0].indent
+            atl_script = '\n'.join(_dedent_block(tokens, block_start, block_end, body_base_indent))
+            if pos is None:
+                                                                             
+                                                                           
+                base_xalign, base_yalign = 0.5, 1.0
+                fx, fy, fz = atl_engine.quick_final_position(atl_script, base_xalign, base_yalign, 1.0)
+                pos = SpritePosition(xalign=fx, yalign=fy, zoom=fz)
 
         node_type = forced_type
         unresolved_var = False
@@ -526,11 +527,11 @@ class RpyScriptParser:
             return end_index
         elif node_type in (NodeType.SCENE, NodeType.SHOW_BG, NodeType.SHOW_CG):
             kwargs = {"bg_var": var} if node_type != NodeType.SHOW_CG else {"cg_var": var}
-            node = SceneNode(node_type=node_type, transition=trans, **kwargs)
+            node = SceneNode(node_type=node_type, transition=trans, atl_script=atl_script, **kwargs)
         else:
             node = SceneNode(
                 node_type=NodeType.SHOW_SPRITE, sprite_var=var, transition=trans,
-                sprite_position=pos or SpritePosition(0.5, 1.0),
+                sprite_position=pos or SpritePosition(0.5, 1.0), atl_script=atl_script,
             )
         if unresolved_var:
             node.import_warning = (

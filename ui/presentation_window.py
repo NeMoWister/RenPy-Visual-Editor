@@ -13,24 +13,62 @@ from dataclasses import dataclass
 from typing import List, Optional
 
 from PyQt6.QtWidgets import QWidget, QPushButton, QHBoxLayout, QVBoxLayout, QLabel
-from PyQt6.QtCore import Qt, QRect, QRectF, QTimer, pyqtSignal, QUrl
+from PyQt6.QtCore import Qt, QRect, QRectF, QTimer, QElapsedTimer, pyqtSignal, QUrl
 from PyQt6.QtGui import QPainter, QPixmap, QColor, QFont, QPen, QKeyEvent, QTextDocument
 
 from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
 
 from core.models import Project, NodeType
+from core.i18n import tr
+from ui.theme import theme_manager
 from core.presentation_engine import (
     Position, first_position, next_position, find_label, node_at, scene_at, fast_forward_state
 )
 from core.scene_state import SceneState, _apply_node
+from core import atl as atl_engine
+from core import transitions
+from core.custom_transitions import resolve as resolve_custom_transition
+from ui.transition_compositor import render_transition_frame, punch_offset
 from ui.pixmap_cache import get_pixmap, get_composite
 from core.renpy_text_tags import parse_renpy_text, runs_to_html, truncate_runs, visible_length, strip_tags as _clean
+
+
+def _resolve_mask_path(rm, rel_path: str) -> Optional[str]:
+    """См. main_window._resolve_mask_path - тот же резолвер путей маски
+    кастомного ImageDissolve, продублирован здесь, чтобы presentation_window
+    не зависел от main_window (независимые окна)."""
+    if not rel_path or rm is None:
+        return None
+    if os.path.isabs(rel_path) and os.path.isfile(rel_path):
+        return rel_path
+    for source in ("custom", "default"):
+        candidate = os.path.join(rm.get_source_root(source), rel_path)
+        if os.path.isfile(candidate):
+            return candidate
+    return None
 
 
 @dataclass
 class BacklogEntry:
     char_name: str
     text: str
+
+
+@dataclass
+class PresentSprite:
+    """Один активный спрайт для честной отрисовки в презентации - как
+    ActiveSprite из core/scene_state.py, но только то, что нужно для
+    рендера (плюс варианты картинок для смены-по-ATL)."""
+    pixmap: QPixmap
+    xalign: float
+    yalign: float
+    zoom: float
+    atl_script: str = ""
+    image_variants: dict = None
+
+    def __post_init__(self):
+        if self.image_variants is None:
+            self.image_variants = {}
 
 
 class PresentationCanvas(QWidget):
@@ -43,7 +81,16 @@ class PresentationCanvas(QWidget):
     def __init__(self):
         super().__init__()
         self.bg_pixmap: Optional[QPixmap] = None
-        self.sprites: List[tuple] = []                                          
+        self.sprites: List[PresentSprite] = []                                          
+        self.bg_atl_script: str = ""
+        self._mask_resolver = None
+        self._active_transition = None
+        self._atl_clock = QElapsedTimer()
+        self._atl_clock.start()
+        self._atl_timer = QTimer(self)
+        self._atl_timer.setInterval(33)
+        self._atl_timer.timeout.connect(self._on_atl_tick)
+        self._atl_timer.start()
         self.char_name = ""
         self.char_color: Optional[str] = None
         self.text = ""
@@ -75,11 +122,57 @@ class PresentationCanvas(QWidget):
         self.cps = max(1, cps)
         self._tick_timer.setInterval(max(5, 1000 // self.cps))
 
-    def set_background(self, path: Optional[str]):
-        self.bg_pixmap = get_pixmap(path) if path and os.path.isfile(path) else None
+    def _on_atl_tick(self):
+        """См. ScenePreview._on_atl_tick - перерисовывает, только если
+        реально что-то анимировано (фон, хотя бы один спрайт или переход)."""
+        if self._active_transition is not None:
+            self.update()
+            return
+        if self.bg_atl_script and atl_engine.is_animated(self.bg_atl_script):
+            self.update()
+            return
+        for sp in self.sprites:
+            if sp.atl_script and atl_engine.is_animated(sp.atl_script):
+                self.update()
+                return
+
+    def set_mask_resolver(self, fn):
+        self._mask_resolver = fn
+
+    def snapshot_current(self) -> QPixmap:
+        """Снимок текущего кадра (фон+спрайты) - вызывается ПЕРЕД тем, как
+        поменять состояние сцены, чтобы было с чем честно проиграть переход."""
+        return self._render_scene_pixmap()
+
+    def start_transition(self, old_pixmap: Optional[QPixmap], spec):
+        if spec is None:
+            return
+        if spec.kind != transitions.TransitionKind.PUNCH and old_pixmap is None:
+            return
+        new_pixmap = self._render_scene_pixmap() if spec.kind != transitions.TransitionKind.PUNCH else None
+        clock = QElapsedTimer()
+        clock.start()
+        self._active_transition = (old_pixmap, new_pixmap, spec, clock)
         self.update()
 
-    def set_sprites(self, sprites: List[tuple]):
+    def _render_scene_pixmap(self) -> QPixmap:
+        w, h = max(1, self.width()), max(1, self.height())
+        pm = QPixmap(w, h)
+        pm.fill(QColor(10, 10, 14))
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        self._paint_scene(p, w, h)
+        p.end()
+        return pm
+
+    def set_background(self, path: Optional[str], atl_script: str = ""):
+        self.bg_pixmap = get_pixmap(path) if path and os.path.isfile(path) else None
+        self.bg_atl_script = atl_script
+        self._atl_clock.restart()
+        self.update()
+
+    def set_sprites(self, sprites: List[PresentSprite]):
         self.sprites = sprites
         self.update()
 
@@ -191,35 +284,97 @@ class PresentationCanvas(QWidget):
         self.backlog_visible = not self.backlog_visible
         self.update()
 
+    def _paint_scene(self, painter: QPainter, w: int, h: int):
+        painter.fillRect(0, 0, w, h, QColor(0, 0, 0))
+
+        if self.bg_pixmap:
+            if self.bg_atl_script and self.bg_atl_script.strip():
+                t = self._atl_clock.elapsed() / 1000.0
+                vis = atl_engine.resolve_visual(
+                    self.bg_atl_script, t, base_xalign=0.5, base_yalign=0.5, base_zoom=1.0,
+                )
+                scaled = self.bg_pixmap.scaled(w, h, Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                                                Qt.TransformationMode.SmoothTransformation)
+                dx = (vis["xalign"] - 0.5) * w
+                dy = (vis["yalign"] - 0.5) * h
+                zoom = max(0.2, min(3.0, vis["zoom"]))
+                painter.save()
+                painter.translate(w / 2, h / 2)
+                painter.rotate(vis["rotate"])
+                painter.scale(zoom, zoom)
+                x0 = (w - scaled.width()) // 2
+                y0 = (h - scaled.height()) // 2
+                painter.translate(-w / 2 + dx, -h / 2 + dy)
+                painter.setOpacity(max(0.0, min(1.0, vis["alpha"])))
+                painter.drawPixmap(x0, y0, scaled)
+                painter.restore()
+            else:
+                scaled = self.bg_pixmap.scaled(w, h, Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                                                Qt.TransformationMode.SmoothTransformation)
+                x = (w - scaled.width()) // 2
+                y = (h - scaled.height()) // 2
+                painter.drawPixmap(x, y, scaled)
+        else:
+            painter.setPen(QColor(70, 70, 85))
+            painter.setFont(QFont("Arial", 20))
+            painter.drawText(QRect(0, 0, w, h), Qt.AlignmentFlag.AlignCenter, "[ Нет фона ]")
+
+        t = self._atl_clock.elapsed() / 1000.0
+        for sp in self.sprites:
+            if sp.atl_script:
+                vis = atl_engine.resolve_visual(
+                    sp.atl_script, t, base_xalign=sp.xalign, base_yalign=sp.yalign, base_zoom=sp.zoom,
+                )
+            else:
+                vis = {"xalign": sp.xalign, "yalign": sp.yalign, "zoom": sp.zoom,
+                       "alpha": 1.0, "rotate": 0.0, "image_text": None}
+            pm = sp.pixmap
+            if vis.get("image_text") and sp.image_variants:
+                pm = sp.image_variants.get(vis["image_text"], sp.pixmap)
+            sw = int(pm.width() * vis["zoom"] * (h / 720))
+            sh = int(pm.height() * vis["zoom"] * (h / 720))
+            max_h = int(h * 0.92)
+            if sh > max_h:
+                scale = max_h / sh
+                sw = int(sw * scale)
+                sh = max_h
+            x = int(vis["xalign"] * w - sw / 2)
+            y = int(vis["yalign"] * h - sh - h * 0.02)
+            scaled = pm.scaled(sw, sh, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            painter.save()
+            painter.setOpacity(max(0.0, min(1.0, vis["alpha"])))
+            if abs(vis["rotate"]) > 1e-6:
+                center = QRectF(x, y, sw, sh).center()
+                painter.translate(center)
+                painter.rotate(vis["rotate"])
+                painter.translate(-center)
+            painter.drawPixmap(x, y, scaled)
+            painter.restore()
+
     def paintEvent(self, event):
         w, h = self.width(), self.height()
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         painter.fillRect(0, 0, w, h, QColor(0, 0, 0))
 
-        if self.bg_pixmap:
-            scaled = self.bg_pixmap.scaled(w, h, Qt.AspectRatioMode.KeepAspectRatioByExpanding,
-                                            Qt.TransformationMode.SmoothTransformation)
-            x = (w - scaled.width()) // 2
-            y = (h - scaled.height()) // 2
-            painter.drawPixmap(x, y, scaled)
+        if self._active_transition is not None:
+            old_pm, new_pm, spec, clock = self._active_transition
+            t = clock.elapsed() / 1000.0
+            if spec.kind == transitions.TransitionKind.PUNCH:
+                dx, dy = punch_offset(spec, t)
+                painter.save()
+                painter.translate(dx, dy)
+                self._paint_scene(painter, w, h)
+                painter.restore()
+            else:
+                render_transition_frame(
+                    painter, QRect(0, 0, w, h), old_pm, new_pm, spec, t,
+                    mask_resolver=self._mask_resolver,
+                )
+            if t >= spec.total_duration:
+                self._active_transition = None
         else:
-            painter.setPen(QColor(70, 70, 85))
-            painter.setFont(QFont("Arial", 20))
-            painter.drawText(QRect(0, 0, w, h), Qt.AlignmentFlag.AlignCenter, "[ Нет фона ]")
-
-        for pm, xalign, yalign, zoom in self.sprites:
-            sw = int(pm.width() * zoom * (h / 720))
-            sh = int(pm.height() * zoom * (h / 720))
-            max_h = int(h * 0.92)
-            if sh > max_h:
-                scale = max_h / sh
-                sw = int(sw * scale)
-                sh = max_h
-            x = int(xalign * w - sw / 2)
-            y = int(h - sh - h * 0.02)
-            scaled = pm.scaled(sw, sh, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-            painter.drawPixmap(x, y, scaled)
+            self._paint_scene(painter, w, h)
 
         if self.menu_choices is not None:
             self._paint_menu(painter, w, h)
@@ -230,6 +385,7 @@ class PresentationCanvas(QWidget):
 
         if self.backlog_visible:
             self._paint_backlog(painter, w, h)
+
 
         painter.end()
 
@@ -276,7 +432,7 @@ class PresentationCanvas(QWidget):
 
         painter.setPen(QColor(150, 150, 150))
         painter.setFont(QFont("Arial", 10))
-        hint = "клик / пробел ▶" if self.is_fully_revealed() else "клик - показать целиком"
+        hint = tr("present.hint_continue") if self.is_fully_revealed() else tr("present.hint_reveal")
         painter.drawText(QRect(w - 220, h - 22, 210, 20), Qt.AlignmentFlag.AlignRight, hint)
 
     def _paint_nvl(self, painter: QPainter, w: int, h: int):
@@ -327,7 +483,7 @@ class PresentationCanvas(QWidget):
 
         painter.setPen(QColor(150, 150, 150))
         painter.setFont(QFont("Arial", 10))
-        hint = "клик / пробел ▶" if self.is_fully_revealed() else "клик - показать целиком"
+        hint = tr("present.hint_continue") if self.is_fully_revealed() else tr("present.hint_reveal")
         painter.drawText(QRect(w - 220, h - 26, 210, 20), Qt.AlignmentFlag.AlignRight, hint)
 
     def _nvl_line_html(self, char_name: str, runs, color: Optional[str], dim: bool, base_size: int = 15) -> str:
@@ -372,10 +528,11 @@ class PresentationCanvas(QWidget):
             painter.drawText(rect, Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextWordWrap, _clean(choice))
 
     def _paint_backlog(self, painter: QPainter, w: int, h: int):
+        t = theme_manager.tokens()
         painter.fillRect(0, 0, w, h, QColor(5, 5, 8, 235))
-        painter.setPen(QColor(255, 140, 60))
+        painter.setPen(QColor(t.accent_2))
         painter.setFont(QFont("Arial", max(15, int(h * 0.026)), QFont.Weight.Bold))
-        painter.drawText(QRect(0, int(h * 0.04), w, 40), Qt.AlignmentFlag.AlignCenter, "История реплик (Tab - закрыть)")
+        painter.drawText(QRect(0, int(h * 0.04), w, 40), Qt.AlignmentFlag.AlignCenter, tr("present.backlog_title"))
 
         pad = int(w * 0.12)
         content_w = w - 2 * pad
@@ -385,6 +542,8 @@ class PresentationCanvas(QWidget):
         painter.setFont(font)
         metrics = painter.fontMetrics()
         gap = int(h * 0.015)
+        name_color = QColor(t.accent_1)
+        body_color = QColor(t.text_muted)
 
         for entry in self.backlog[-30:]:
             if y > max_y:
@@ -394,7 +553,7 @@ class PresentationCanvas(QWidget):
             needed_rect = metrics.boundingRect(QRect(0, 0, content_w, 10_000),
                                                 Qt.TextFlag.TextWordWrap, full_text)
             entry_h = max(metrics.height(), needed_rect.height())
-            painter.setPen(QColor(255, 180, 100) if entry.char_name else QColor(200, 200, 200))
+            painter.setPen(name_color if entry.char_name else body_color)
             painter.drawText(QRect(pad, y, content_w, entry_h),
                               Qt.AlignmentFlag.AlignLeft | Qt.TextFlag.TextWordWrap, full_text)
             y += entry_h + gap
@@ -424,7 +583,7 @@ class PresentationWindow(QWidget):
         super().__init__(parent, Qt.WindowType.Window)
         self.project = project
         self.rm = rm
-        self.setWindowTitle(f"Презентация - {project.title}")
+        self.setWindowTitle(tr("present.window_title", title=project.title))
         self.setStyleSheet("background:#000;")
         self.state = SceneState()
         self.pos: Optional[Position] = None
@@ -443,6 +602,7 @@ class PresentationWindow(QWidget):
         self.canvas.advance_requested.connect(self._on_advance_clicked)
         self.canvas.choice_selected.connect(self._on_choice_selected)
         self.canvas.reveal_complete.connect(self._on_reveal_complete)
+        self.canvas.set_mask_resolver(lambda rel: _resolve_mask_path(rm, rel))
 
         self._setup_audio()
         self._setup_ui()
@@ -480,45 +640,46 @@ class PresentationWindow(QWidget):
         bl = QHBoxLayout(bar)
         bl.setContentsMargins(8, 4, 8, 4)
 
-        btn_style = """
-            QPushButton {
-                background: #ff8c3d; color: #1a1005; font-weight: bold;
+        t = theme_manager.tokens()
+        btn_style = f"""
+            QPushButton {{
+                background: {t.accent_1}; color: {t.accent_text}; font-weight: bold;
                 border: none; border-radius: 6px; padding: 6px 12px; font-size: 12px;
-            }
-            QPushButton:hover { background: #ffa020; }
-            QPushButton:pressed { background: #e6752a; }
-            QPushButton:checked { background: #cc5500; color: #fff; }
+            }}
+            QPushButton:hover {{ background: {t.accent_2}; }}
+            QPushButton:pressed {{ background: {t.accent_1}; }}
+            QPushButton:checked {{ background: {t.accent_soft}; color: {t.text}; }}
         """
 
-        self.autoplay_btn = QPushButton("▶ Автопрогон: выкл")
+        self.autoplay_btn = QPushButton(tr("present.autoplay_off"))
         self.autoplay_btn.setCheckable(True)
         self.autoplay_btn.setStyleSheet(btn_style)
         self.autoplay_btn.clicked.connect(self._toggle_autoplay)
         bl.addWidget(self.autoplay_btn)
 
-        btn_prev_line = QPushButton("⏮ Пред. реплика (←)")
+        btn_prev_line = QPushButton(tr("present.prev_line_button"))
         btn_prev_line.setStyleSheet(btn_style)
         btn_prev_line.clicked.connect(self._step_back_line)
         bl.addWidget(btn_prev_line)
 
         self.speed_btn = QPushButton()
         self.speed_btn.setStyleSheet(btn_style)
-        self.speed_btn.setToolTip("Скорость печати текста ([ медленнее / ] быстрее)")
+        self.speed_btn.setToolTip(tr("present.speed_tooltip"))
         self.speed_btn.clicked.connect(self._cycle_speed)
         self._update_speed_btn_text()
         bl.addWidget(self.speed_btn)
 
-        btn_backlog = QPushButton("📜 История (Tab)")
+        btn_backlog = QPushButton(tr("present.backlog_button"))
         btn_backlog.setStyleSheet(btn_style)
         btn_backlog.clicked.connect(self.canvas.toggle_backlog)
         bl.addWidget(btn_backlog)
 
-        btn_skip = QPushButton("⏭ Пропустить шаг")
+        btn_skip = QPushButton(tr("present.skip_step_button"))
         btn_skip.setStyleSheet(btn_style)
         btn_skip.clicked.connect(self._on_advance_clicked)
         bl.addWidget(btn_skip)
 
-        btn_close = QPushButton("✕ Выход (Esc)")
+        btn_close = QPushButton(tr("present.exit_button"))
         btn_close.setStyleSheet(btn_style)
         btn_close.clicked.connect(self.close)
         bl.addWidget(btn_close)
@@ -534,7 +695,7 @@ class PresentationWindow(QWidget):
         cl = QHBoxLayout(crumbs)
         cl.setContentsMargins(10, 4, 10, 4)
         self.breadcrumb_label = QLabel("")
-        self.breadcrumb_label.setStyleSheet("color:#9fd6ff; font-size:11px;")
+        self.breadcrumb_label.setObjectName("info_hint")
         cl.addWidget(self.breadcrumb_label)
         crumbs.setParent(self)
         crumbs.adjustSize()
@@ -569,14 +730,14 @@ class PresentationWindow(QWidget):
             self.label_trail = []
         self._update_breadcrumb()
         if self.pos is None:
-            self.canvas.set_dialogue("", "В проекте нет ни одной сцены с нодами.", None)
+            self.canvas.set_dialogue("", tr("present.no_scenes"), None)
             return
         self._run_until_blocking()
 
     def _refresh_visuals(self):
         self.canvas.set_nvl_mode(self.state.nvl_mode)
         bg_path = self._resolve(self.state.cg_var) or self._resolve(self.state.bg_var)
-        self.canvas.set_background(bg_path)
+        self.canvas.set_background(bg_path, atl_script=self.state.bg_atl_script)
         sprites = []
         for sp in self.state.sprite_list():
             pm = None
@@ -591,7 +752,18 @@ class PresentationWindow(QWidget):
                 if path:
                     pm = get_pixmap(path)
             if pm is not None:
-                sprites.append((pm, sp.position.xalign, sp.position.yalign, sp.position.zoom))
+                image_variants = {}
+                if sp.atl_script:
+                    for img_name in atl_engine.referenced_images(sp.atl_script):
+                        vpath = self._resolve(img_name)
+                        if vpath:
+                            vp = get_pixmap(vpath)
+                            if vp is not None:
+                                image_variants[img_name] = vp
+                sprites.append(PresentSprite(
+                    pixmap=pm, xalign=sp.position.xalign, yalign=sp.position.yalign,
+                    zoom=sp.position.zoom, atl_script=sp.atl_script, image_variants=image_variants,
+                ))
         self.canvas.set_sprites(sprites)
 
     def _resolve(self, var: Optional[str]) -> Optional[str]:
@@ -599,6 +771,27 @@ class PresentationWindow(QWidget):
             return None
         entry = self.rm.find_by_var(var)
         return entry.abs_path if entry else None
+
+    _VISUAL_TRANSITION_TYPES = (
+        NodeType.SCENE, NodeType.SHOW_BG, NodeType.SHOW_CG, NodeType.SHOW_SPRITE,
+        NodeType.HIDE_SPRITE, NodeType.HIDE_CG, NodeType.WITH_TRANSITION,
+    )
+
+    def _apply_node_with_transition(self, node):
+        """_apply_node + честное проигрывание node.transition (если задан и
+        нода визуальная) - снимает кадр ДО применения, применяет, снимает
+        кадр ПОСЛЕ (через _refresh_visuals) и запускает переход между ними."""
+        trans_text = getattr(node, 'transition', '') or ''
+        spec = None
+        if trans_text and node.node_type in self._VISUAL_TRANSITION_TYPES:
+            spec = transitions.parse_transition(
+                resolve_custom_transition(trans_text, getattr(self.rm, 'base_dir', None)))
+        old_snapshot = self.canvas.snapshot_current() if spec is not None else None
+        _apply_node(self.state, node, is_current=True, rm=self.rm)
+        self._handle_audio(node)
+        self._refresh_visuals()
+        if spec is not None:
+            self.canvas.start_transition(old_snapshot, spec)
 
     def _handle_audio(self, node):
         t = node.node_type
@@ -632,9 +825,7 @@ class PresentationWindow(QWidget):
                 self._show_end()
                 return
             node = node_at(self.project, self.pos)
-            _apply_node(self.state, node, is_current=True, rm=self.rm)
-            self._handle_audio(node)
-            self._refresh_visuals()
+            self._apply_node_with_transition(node)
 
             t = node.node_type
             if t == NodeType.LABEL:
@@ -740,8 +931,8 @@ class PresentationWindow(QWidget):
 
     def _update_speed_btn_text(self):
         mult = self._speed_presets[self._speed_idx]
-        label = "мгновенно" if mult >= 3.0 else f"{mult:g}x"
-        self.speed_btn.setText(f"⚡ Скорость текста: {label}")
+        label = tr("present.speed_instant") if mult >= 3.0 else f"{mult:g}x"
+        self.speed_btn.setText(tr("present.speed_button", label=label))
 
     def _cycle_speed(self):
         self._speed_idx = (self._speed_idx + 1) % len(self._speed_presets)
@@ -792,7 +983,7 @@ class PresentationWindow(QWidget):
 
     def _toggle_autoplay(self, checked: bool):
         self.autoplay = checked
-        self.autoplay_btn.setText(f"▶ Автопрогон: {'вкл' if checked else 'выкл'}")
+        self.autoplay_btn.setText(tr("present.autoplay_state", state=tr("present.autoplay_on_word") if checked else tr("present.autoplay_off_word")))
         if not checked:
             self.auto_timer.stop()
         elif self.pos is not None and self.canvas.is_fully_revealed():
