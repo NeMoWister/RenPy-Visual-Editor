@@ -322,6 +322,55 @@ A: If `X` isn't found in resources, the code is preserved verbatim. Make sure th
 
 ## 13. How it works: features by version 🧭
 
+### v1.5.0
+
+- **ATL transform parsing** - freeform ATL (Ren'Py Animation & Transform
+  Language) text typed into a node's transform field is now recognized by
+  the editor and broken down into readable steps (anchor, position,
+  rotation, zoom, etc.) instead of staying an opaque text blob.
+- **ATL animation emulation in preview** - parsed steps are played back
+  right in the node's live preview, including looping via `repeat`. For
+  example, this ATL:
+  ```
+  anchor (0.0, 0.0) pos (0.0, 0.0)
+  linear 0.1 pos (-9, -7)
+  linear 0.1 pos (0, 0)
+  linear 0.1 pos (9, -7)
+  linear 0.1 pos (0, 0)
+  repeat
+  ```
+  plays back in the preview step by step, exactly as written, and loops.
+- **Transition emulation and custom transitions** - besides the built-in
+  transition set, there's now a live preview of any transition (including
+  mask-based `ImageDissolve`) right in the editor, plus a dedicated dialog
+  for creating, tuning, and saving your own named transitions.
+- **Spell-check fix** - fixed false positives in dialogue spell checking.
+- ⚠️ **Known issue: mask transitions in presentation mode** - in the
+  transition editor dialog, a mask-based `ImageDissolve` transition
+  previews correctly, but it renders incorrectly in presentation mode
+  (the full-screen script run). Not yet fixed - a fix is in progress.
+
+### v1.4.1
+
+- **English UI localization** - the editor interface has been translated
+  into English.
+- **`define` block in the code preview** - `define` declarations are no
+  longer duplicated inside the main script body in the code preview; they
+  now show up once, in their own `defines` block.
+- **No more forced "Apply" before the next node** - while editing a node's
+  parameters, you can go straight to "Add next" - pending changes are
+  applied automatically, no separate confirmation step needed.
+- **Larger default resource settings window** - the resource settings
+  popup now opens 50% larger by default, so you have to manually resize it
+  less often.
+- **New themes** - alongside the previous default theme (now called
+  Ember), added Liquid Glass, Cyberpunk: Neon Grid, Minimal, and Windows
+  11 Dark.
+- **Waveform drawing no longer needs `ffmpeg`** - the waveform
+  visualization in music/sound/ambience fields (see v1.4.0) no longer
+  depends on `ffmpeg` being on `PATH` - it's now rendered with the
+  editor's own code.
+
 ### v1.4.0
 
 - **Choice menus with nested node support** - a menu option can now have
@@ -473,6 +522,23 @@ A: If `X` isn't found in resources, the code is preserved verbatim. Make sure th
 
 ## 14. Version history 📜
 
+### v1.5.0
+- ATL transform parsing
+- ATL animation emulation in preview (including `repeat`)
+- Transition emulation and custom transitions
+- Spell-check fix
+- ⚠️ Known issue: mask transitions render incorrectly in presentation mode
+  (correct in the transition editor preview)
+
+### v1.4.1
+- English UI localization
+- `define` block now shown only in its own block, no longer duplicated in
+  the main script code preview
+- No more forced "Apply" before adding the next node
+- Resource settings window opens 50% larger by default
+- New themes: Liquid Glass, Cyberpunk: Neon Grid, Minimal, Windows 11 Dark
+- Waveform drawing no longer depends on `ffmpeg`
+
 ### v1.4.0
 - Choice menus with nested node support
 - «Where used» resource usage viewer
@@ -528,4 +594,4 @@ A: If `X` isn't found in resources, the code is preserved verbatim. Make sure th
 
 ---
 
-*Documentation is current for version 1.4.0.*
+*Documentation is current for version 1.5.0.*
