@@ -23,6 +23,7 @@ widget tree has a real CPU cost.
 from PyQt6.QtCore import Qt, QRectF, QTimer
 from PyQt6.QtGui import QPainter, QPainterPath, QColor, QPixmap
 from PyQt6.QtWidgets import QFrame, QGraphicsScene, QGraphicsPixmapItem, QGraphicsBlurEffect
+from ui.theme import theme_manager
 
 
 class GlassPanel(QFrame):
@@ -130,7 +131,9 @@ class GlassPanel(QFrame):
         if self._bg_pixmap is not None and not self._bg_pixmap.isNull():
             painter.drawPixmap(0, 0, self._bg_pixmap)
         else:
-            painter.fillPath(path, QColor(20, 20, 26, 200))
+            fallback = QColor(theme_manager.tokens().bg_window)
+            fallback.setAlpha(200)
+            painter.fillPath(path, fallback)
 
         painter.fillPath(path, self._tint)
 

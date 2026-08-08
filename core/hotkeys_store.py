@@ -10,20 +10,52 @@ from typing import Dict, Optional
 from core.unified_config import load_section, save_section
 
                                                                          
-ACTIONS: "OrderedDict[str, tuple]" = OrderedDict([
-    ("add_dialogue",     ("Добавить ноду: 💬 Реплика",           "Ctrl+1")),
-    ("add_narration",    ("Добавить ноду: 📖 Повествование",     "Ctrl+2")),
-    ("add_show_sprite",  ("Добавить ноду: 🧍 Показать спрайт",   "Ctrl+3")),
-    ("add_hide_sprite",  ("Добавить ноду: 🚫 Скрыть спрайт",     "Ctrl+4")),
-    ("add_show_bg",      ("Добавить ноду: 🖼 Показать фон",      "Ctrl+5")),
-    ("add_pause",        ("Добавить ноду: ⏸ Пауза",              "Ctrl+6")),
-    ("add_menu",         ("Добавить ноду: 📋 Меню выбора",       "Ctrl+7")),
-    ("duplicate_node",   ("Дублировать текущую ноду",            "Ctrl+D")),
-    ("move_node_up",     ("Переместить ноду вверх",               "Ctrl+Up")),
-    ("move_node_down",   ("Переместить ноду вниз",                "Ctrl+Down")),
+_ACTION_KEYS = OrderedDict([
+    ("add_dialogue",     ("hotkey.add_dialogue",     "Ctrl+1")),
+    ("add_narration",    ("hotkey.add_narration",    "Ctrl+2")),
+    ("add_show_sprite",  ("hotkey.add_show_sprite",  "Ctrl+3")),
+    ("add_hide_sprite",  ("hotkey.add_hide_sprite",  "Ctrl+4")),
+    ("add_show_bg",      ("hotkey.add_show_bg",      "Ctrl+5")),
+    ("add_pause",        ("hotkey.add_pause",        "Ctrl+6")),
+    ("add_menu",         ("hotkey.add_menu",         "Ctrl+7")),
+    ("duplicate_node",   ("hotkey.duplicate_node",   "Ctrl+D")),
+    ("move_node_up",     ("hotkey.move_node_up",     "Ctrl+Up")),
+    ("move_node_down",   ("hotkey.move_node_down",   "Ctrl+Down")),
 ])
 
-DEFAULTS: Dict[str, str] = {k: v[1] for k, v in ACTIONS.items()}
+
+def _build_actions():
+    from core.i18n import tr
+    return OrderedDict(
+        (action_id, (tr(i18n_key), default_key))
+        for action_id, (i18n_key, default_key) in _ACTION_KEYS.items()
+    )
+
+
+class _ActionsProxy:
+    """Ведёт себя как ACTIONS (dict-подобный доступ), но перестраивает
+    переводы меток при каждом обращении - так тумблер языка в настройках
+    сразу отражается в таблице горячих клавиш без перезапуска."""
+
+    def items(self):
+        return _build_actions().items()
+
+    def get(self, key, default=None):
+        return _build_actions().get(key, default)
+
+    def __getitem__(self, key):
+        return _build_actions()[key]
+
+    def __iter__(self):
+        return iter(_build_actions())
+
+    def __len__(self):
+        return len(_ACTION_KEYS)
+
+
+ACTIONS = _ActionsProxy()
+
+DEFAULTS: Dict[str, str] = {k: v[1] for k, v in _ACTION_KEYS.items()}
 
 
 @dataclass

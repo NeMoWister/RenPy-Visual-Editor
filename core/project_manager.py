@@ -15,6 +15,7 @@ def node_to_dict(n: SceneNode) -> dict:
         'bg_var': n.bg_var, 'cg_var': n.cg_var, 'transition': n.transition,
         'sprite_var': n.sprite_var, 'sprite_expression': n.sprite_expression,
         'sprite_position': _sp_to_dict(n.sprite_position), 'sprite_tag': n.sprite_tag,
+        'atl_script': n.atl_script,
         'hide_group': n.hide_group,
         'music_var': n.music_var, 'sound_var': n.sound_var,
         'music_fadeout': n.music_fadeout, 'music_fadein': n.music_fadein,
@@ -35,6 +36,7 @@ def node_to_dict(n: SceneNode) -> dict:
         'custom_template_id': n.custom_template_id, 'custom_params': n.custom_params,
         'import_warning': n.import_warning,
         'nvl_action': n.nvl_action,
+        'pos_x': n.pos_x, 'pos_y': n.pos_y,
     }
 
 
@@ -52,6 +54,7 @@ def node_from_dict(d: dict, new_id: bool = False) -> SceneNode:
     n.sprite_expression = d.get('sprite_expression')
     n.sprite_position = _sp_from_dict(d.get('sprite_position', {}))
     n.sprite_tag = d.get('sprite_tag')
+    n.atl_script = d.get('atl_script', '')
     n.hide_group = d.get('hide_group')
     n.music_var = d.get('music_var')
     n.sound_var = d.get('sound_var')
@@ -90,6 +93,8 @@ def node_from_dict(d: dict, new_id: bool = False) -> SceneNode:
     n.import_warning = d.get('import_warning', '')
     n.nvl_action = d.get('nvl_action', 'enter')
     n.custom_params = dict(d.get('custom_params', {}))
+    n.pos_x = d.get('pos_x')
+    n.pos_y = d.get('pos_y')
     return n
 
 

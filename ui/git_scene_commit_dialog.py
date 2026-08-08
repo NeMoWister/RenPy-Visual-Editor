@@ -9,8 +9,15 @@ from core.git_scene_commit import (
     read_json_file, read_head_json, diff_scenes, commit_selected_scenes,
     STATUS_ADDED, STATUS_MODIFIED, STATUS_REMOVED,
 )
+from core.i18n import tr
 
-_STATUS_LABEL = {STATUS_ADDED: "🆕 новая", STATUS_MODIFIED: "✏ изменена", STATUS_REMOVED: "🗑 удалена"}
+def _status_label():
+    return {
+        STATUS_ADDED: tr("git_scene_commit.status_added"),
+        STATUS_MODIFIED: tr("git_scene_commit.status_modified"),
+        STATUS_REMOVED: tr("git_scene_commit.status_removed"),
+    }
+
 _STATUS_COLOR = {STATUS_ADDED: "#6fd68f", STATUS_MODIFIED: "#ffb84d", STATUS_REMOVED: "#ff6b6b"}
 
 
@@ -34,21 +41,21 @@ class _PartialCommitWorker(QThread):
                 on_progress=lambda done, total: self.progress.emit(done, total),
             )
         except Exception as e:
-            ok, out = False, f"Неожиданная ошибка: {e}"
+            ok, out = False, tr("git_scene_commit.unexpected_error", error=e)
         self.done.emit(ok, out)
 
 
 class GitScenePartialCommitDialog(QDialog):
     """Коммит только по выбранным сценам - остальные изменения остаются
     несохранёнными в истории (но никуда не пропадают из самого файла на
-    диске/в редакторе, см. core.git_scene_commit)."""
+    диске/в редакторе, см. core.git_scene_commit)."""            
 
     def __init__(self, repo_dir: str, project_abs_path: str, relpath: str, parent=None):
         super().__init__(parent)
         self.repo_dir = repo_dir
         self.project_abs_path = project_abs_path
         self.relpath = relpath
-        self.setWindowTitle("Commit по сценам")
+        self.setWindowTitle(tr("git_scene_commit.title"))
         self.setMinimumSize(560, 520)
 
         self.current_data = read_json_file(project_abs_path)
@@ -61,29 +68,25 @@ class GitScenePartialCommitDialog(QDialog):
         layout = QVBoxLayout(self)
 
         if self.current_data is None:
-            layout.addWidget(QLabel("Не удалось прочитать файл проекта."))
+            layout.addWidget(QLabel(tr("git_scene_commit.read_failed")))
             return
 
         if not self.diffs:
-            layout.addWidget(QLabel("Нет изменённых сцен - коммитить нечего."))
+            layout.addWidget(QLabel(tr("git_scene_commit.no_changes")))
             buttons = QHBoxLayout()
             buttons.addStretch()
-            close_btn = QPushButton("Закрыть")
+            close_btn = QPushButton(tr("git_scene_commit.close"))
             close_btn.clicked.connect(self.reject)
             buttons.addWidget(close_btn)
             layout.addLayout(buttons)
             return
 
-        layout.addWidget(QLabel(
-            "Отметьте сцены, которые нужно включить в этот снепшот. Остальные "
-            "изменения (не отмеченные) останутся в рабочей копии как есть - "
-            "просто не попадут в этот коммит, их можно будет закоммитить позже."
-        ))
+        layout.addWidget(QLabel(tr("git_scene_commit.info")))
 
         self.lst = QListWidget()
         self.lst.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
         for entry in self.diffs:
-            item = QListWidgetItem(f"{_STATUS_LABEL.get(entry.status, entry.status)}  -  {entry.name}")
+            item = QListWidgetItem(f"{_status_label().get(entry.status, entry.status)}  -  {entry.name}")
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             item.setCheckState(Qt.CheckState.Checked)
             item.setForeground(QColor(_STATUS_COLOR.get(entry.status, "#ccc")))
@@ -92,26 +95,26 @@ class GitScenePartialCommitDialog(QDialog):
         layout.addWidget(self.lst, 1)
 
         sel_row = QHBoxLayout()
-        btn_all = QPushButton("Отметить все")
+        btn_all = QPushButton(tr("git_scene_commit.check_all"))
         btn_all.clicked.connect(lambda: self._set_all(Qt.CheckState.Checked))
         sel_row.addWidget(btn_all)
-        btn_none = QPushButton("Снять все")
+        btn_none = QPushButton(tr("git_scene_commit.check_none"))
         btn_none.clicked.connect(lambda: self._set_all(Qt.CheckState.Unchecked))
         sel_row.addWidget(btn_none)
         sel_row.addStretch()
         layout.addLayout(sel_row)
 
-        layout.addWidget(QLabel("Сообщение коммита:"))
+        layout.addWidget(QLabel(tr("git_scene_commit.message_label")))
         self.msg_edit = QLineEdit()
-        self.msg_edit.setPlaceholderText("напр. «Глава 1 - правки текста»")
+        self.msg_edit.setPlaceholderText(tr("git_scene_commit.message_placeholder"))
         layout.addWidget(self.msg_edit)
 
         btn_row = QHBoxLayout()
         btn_row.addStretch()
-        btn_cancel = QPushButton("Отмена")
+        btn_cancel = QPushButton(tr("git_scene_commit.cancel"))
         btn_cancel.clicked.connect(self.reject)
         btn_row.addWidget(btn_cancel)
-        btn_commit = QPushButton("💾 Закоммитить выбранное")
+        btn_commit = QPushButton(tr("git_scene_commit.commit_selected"))
         btn_commit.setObjectName("btn_primary")
         btn_commit.clicked.connect(self._do_commit)
         btn_row.addWidget(btn_commit)
@@ -128,12 +131,12 @@ class GitScenePartialCommitDialog(QDialog):
             if item.checkState() == Qt.CheckState.Checked:
                 selected.add(item.data(Qt.ItemDataRole.UserRole))
         if not selected:
-            QMessageBox.information(self, "Ничего не выбрано", "Отметьте хотя бы одну сцену.")
+            QMessageBox.information(self, tr("git_scene_commit.nothing_selected_title"), tr("git_scene_commit.nothing_selected_text"))
             return
-        message = self.msg_edit.text().strip() or "Снепшот (по выбранным сценам)"
+        message = self.msg_edit.text().strip() or tr("git_scene_commit.default_message")
 
-        progress = QProgressDialog("Подготовка...", None, 0, 0, self)
-        progress.setWindowTitle("Git - коммит по сценам")
+        progress = QProgressDialog(tr("git_scene_commit.progress_prepare"), None, 0, 0, self)
+        progress.setWindowTitle(tr("git_scene_commit.progress_title"))
         progress.setWindowModality(Qt.WindowModality.WindowModal)
         progress.setMinimumDuration(300)
         progress.setCancelButton(None)
@@ -146,9 +149,9 @@ class GitScenePartialCommitDialog(QDialog):
             if total:
                 progress.setMaximum(total)
                 progress.setValue(done)
-                progress.setLabelText(f"Добавление файлов в коммит... {done}/{total}")
+                progress.setLabelText(tr("git_scene_commit.progress_adding", done=done, total=total))
             else:
-                progress.setLabelText("Коммит...")
+                progress.setLabelText(tr("git_scene_commit.progress_committing"))
 
         def on_done(ok, out):
             result["ok"] = ok
@@ -163,11 +166,10 @@ class GitScenePartialCommitDialog(QDialog):
 
         ok, out = result.get("ok", False), result.get("out", "")
         if not ok:
-            QMessageBox.critical(self, "Ошибка", out)
+            QMessageBox.critical(self, tr("git_scene_commit.error_title"), out)
             return
         QMessageBox.information(
-            self, "Готово",
-            f"Закоммичено сцен: {len(selected)} из {len(self.diffs)} изменённых.\n\n"
-            f"Остальные изменения остались в рабочей копии - закоммитьте их позже."
+            self, tr("git_scene_commit.done_title"),
+            tr("git_scene_commit.done_text", committed=len(selected), total=len(self.diffs))
         )
         self.accept()

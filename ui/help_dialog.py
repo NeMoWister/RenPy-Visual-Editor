@@ -27,6 +27,7 @@ from PyQt6.QtWidgets import QDialog, QVBoxLayout, QDialogButtonBox
 
 from ui.help_content import USER_GUIDE_HTML, HELP_IMAGES
 from ui.markdown_document import MarkdownView, PALETTE
+from core.i18n import tr
 
 
 class HelpDialog(QDialog):
@@ -34,8 +35,10 @@ class HelpDialog(QDialog):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Руководство пользователя")
+        self.setWindowTitle(tr("menu.help.guide_title"))
         self.resize(1280, 720)
+        from ui.theme import fit_window_to_screen
+        fit_window_to_screen(self, 1280, 720, min_w=760, min_h=520)
         self._setup_ui()
 
     def _setup_ui(self):

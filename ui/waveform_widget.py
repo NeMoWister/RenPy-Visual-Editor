@@ -4,18 +4,21 @@
 который раньше умел только play/stop без какой-либо визуализации.
 
 Пики волны считаются в фоновом QThread через core.audio_waveform.extract_peaks
-(ffmpeg), чтобы не подвешивать интерфейс на время декодирования. Если ffmpeg
-не найден - виджет всё равно полностью рабочий (плоская линия вместо волны,
-маркеры fadein/fadeout и перемотка кликом работают как обычно), просто без
-самой картинки волны.
+(без внешних процессов - только стандартный модуль `wave` для .wav и
+опциональная библиотека soundfile для остальных форматов), чтобы не
+подвешивать интерфейс на время декодирования. Если конкретный формат файла
+не удалось декодировать имеющимися средствами - виджет всё равно полностью
+рабочий (плоская линия вместо волны, маркеры fadein/fadeout и перемотка
+кликом работают как обычно), просто без самой картинки волны.
 """
 from typing import List, Optional
 
+from core.i18n import tr
 from PyQt6.QtCore import Qt, QRectF, QThread, pyqtSignal
 from PyQt6.QtGui import QPainter, QColor, QPen, QLinearGradient
 from PyQt6.QtWidgets import QWidget
 
-from core.audio_waveform import extract_peaks, ffmpeg_available
+from core.audio_waveform import extract_peaks
 
 NUM_BUCKETS = 400
 HANDLE_HIT_PX = 7
@@ -57,7 +60,7 @@ class WaveformWidget(QWidget):
         self._is_playing: bool = False
         self._dragging: Optional[str] = None                                 
         self._loader: Optional[_WaveformLoader] = None
-        self._no_ffmpeg = not ffmpeg_available()
+        self._load_finished_empty = False
 
                             
     def set_audio(self, path: str, duration_ms: int = 0):
@@ -65,6 +68,7 @@ class WaveformWidget(QWidget):
         self._peaks = []
         self._duration_ms = max(0, duration_ms)
         self._position_ms = 0
+        self._load_finished_empty = False
         self.update()
         if not self._path:
             return
@@ -76,6 +80,7 @@ class WaveformWidget(QWidget):
         if path != self._path:
             return                                     
         self._peaks = peaks
+        self._load_finished_empty = not peaks
         self.update()
 
     def set_duration_ms(self, ms: int):
@@ -129,7 +134,7 @@ class WaveformWidget(QWidget):
         if self._duration_ms <= 0:
             p.setPen(QColor("#666"))
             p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter,
-                       "Выберите файл, чтобы увидеть волну")
+                       tr("waveform.select_file_hint"))
             p.end()
             return
 
@@ -145,11 +150,11 @@ class WaveformWidget(QWidget):
         else:
             p.setPen(QColor("#3a3a3a"))
             p.drawLine(0, int(mid), w, int(mid))
-            if self._no_ffmpeg:
+            if self._load_finished_empty:
                 p.setPen(QColor("#666"))
                 p.drawText(self.rect().adjusted(4, 0, -4, 0),
                            Qt.AlignmentFlag.AlignCenter,
-                           "Волна недоступна (не найден ffmpeg) - перемотка и fade всё равно работают")
+                           tr("waveform.no_ffmpeg_hint"))
 
                                                        
         fi_x = self._fadein_x()

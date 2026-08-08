@@ -5,38 +5,37 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal
 
 from core.resource_usage_scanner import UsageRef
+from core.i18n import tr, plural
 
 
 class ResourceUsageDialog(QDialog):
     """Список мест использования одного ресурса ('где используется') с
-    переходом к конкретной ноде - двойной клик или кнопка "Перейти"."""
+    переходом к конкретной ноде - двойной клик или кнопка "Перейти".""" 
     navigate_requested = pyqtSignal(str, list, str)                                     
 
     def __init__(self, var_name: str, display_name: str, refs: list[UsageRef], parent=None):
         super().__init__(parent)
-        self.setWindowTitle(f"Где используется: {display_name}")
+        self.setWindowTitle(tr("res_usage.title", name=display_name))
         self.setMinimumSize(600, 420)
         layout = QVBoxLayout(self)
 
         if not refs:
-            layout.addWidget(QLabel(
-                f"Ресурс «{var_name}» нигде не используется в текущем проекте."
-            ))
+            layout.addWidget(QLabel(tr("res_usage.not_used", var=var_name)))
         else:
-            count_word = "место" if len(refs) == 1 else ("места" if 2 <= len(refs) <= 4 else "мест")
-            layout.addWidget(QLabel(f"Найдено {len(refs)} {count_word} использования - var: {var_name}"))
+            count_word = plural(len(refs), {"ru": ("место", "места", "мест"), "en": ("location", "locations")})
+            layout.addWidget(QLabel(tr("res_usage.found", count=len(refs), word=count_word, var=var_name)))
 
             self.lst = QListWidget()
             for ref in refs:
                 item = QListWidgetItem(f"{ref.breadcrumb}\n{ref.preview}")
                 item.setData(Qt.ItemDataRole.UserRole, ref)
-                item.setToolTip("Двойной клик - перейти к ноде")
+                item.setToolTip(tr("res_usage.dblclick_tooltip"))
                 self.lst.addItem(item)
             self.lst.itemDoubleClicked.connect(self._on_activate)
             layout.addWidget(self.lst, 1)
 
             btn_row = QHBoxLayout()
-            go_btn = QPushButton("➡ Перейти к ноде")
+            go_btn = QPushButton(tr("res_usage.go_to_node"))
             go_btn.clicked.connect(lambda: self._on_activate(self.lst.currentItem()))
             btn_row.addWidget(go_btn)
             btn_row.addStretch()

@@ -14,6 +14,9 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QAction, QKeySequence
+from ui.theme import theme_manager
+
+from core.i18n import tr
 
 
 @dataclass
@@ -89,18 +92,19 @@ class CommandPaletteDialog(QDialog):
         super().__init__(parent, Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
         self.commands = commands
         self.setFixedWidth(560)
-        self.setStyleSheet("""
-            QDialog { background:#20202a; border:1px solid #444; border-radius:8px; }
-            QLineEdit {
-                background:#161620; color:#fff; border:none; border-bottom:1px solid #444;
+        t = theme_manager.tokens()
+        self.setStyleSheet(f"""
+            QDialog {{ background:{t.menu_bg}; border:1px solid {t.glass_border}; border-radius:8px; }}
+            QLineEdit {{
+                background:{t.base_field}; color:{t.text}; border:none; border-bottom:1px solid {t.glass_border_s};
                 padding:10px 12px; font-size:14px;
-            }
-            QListWidget {
-                background:#20202a; color:#eee; border:none; padding:4px;
+            }}
+            QListWidget {{
+                background:{t.menu_bg}; color:{t.text}; border:none; padding:4px;
                 font-size:13px; outline:none;
-            }
-            QListWidget::item { padding:6px 8px; border-radius:4px; }
-            QListWidget::item:selected { background:#ff8c3d; color:#111; }
+            }}
+            QListWidget::item {{ padding:6px 8px; border-radius:4px; }}
+            QListWidget::item:selected {{ background:{t.accent_1}; color:{t.accent_text}; }}
         """)
 
         layout = QVBoxLayout(self)
@@ -108,7 +112,7 @@ class CommandPaletteDialog(QDialog):
         layout.setSpacing(0)
 
         self.search = QLineEdit()
-        self.search.setPlaceholderText("Введите название команды...")
+        self.search.setPlaceholderText(tr("cmd_palette.placeholder"))
         self.search.textChanged.connect(self._refresh)
         layout.addWidget(self.search)
 
@@ -117,8 +121,9 @@ class CommandPaletteDialog(QDialog):
         self.list.itemActivated.connect(self._run_selected)
         layout.addWidget(self.list)
 
-        self.empty_lbl = QLabel("Ничего не найдено")
-        self.empty_lbl.setStyleSheet("color:#888; padding:10px 12px;")
+        self.empty_lbl = QLabel(tr("cmd_palette.nothing_found"))
+        self.empty_lbl.setObjectName("hint_text")
+        self.empty_lbl.setStyleSheet("padding:10px 12px;")
         self.empty_lbl.setVisible(False)
         layout.addWidget(self.empty_lbl)
 

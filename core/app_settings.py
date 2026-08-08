@@ -35,6 +35,8 @@ class AppSettings:
                                                                      
                                   
     nvl_codegen_style: str = "character"
+    language: str = "ru"
+    theme: str = "ember"
 
     @classmethod
     def load(cls, base_dir: str) -> "AppSettings":

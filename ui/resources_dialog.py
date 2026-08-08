@@ -13,6 +13,7 @@ from core.resource_usage_store import ResourceUsageStore
 from core.resource_usage_scanner import scan_project_usage
 from ui.tags_dialog import TagPickerDialog
 from ui.resource_usage_dialog import ResourceUsageDialog
+from core.i18n import tr
 
 TAGGABLE_CATEGORIES = {"bg", "cg"}
 AUDIO_CATEGORIES = {"music", "sounds", "ambience"}
@@ -32,50 +33,44 @@ class ResourcesConfigDialog(QDialog):
         self.project = project
         self._usage_index = scan_project_usage(project) if project is not None else {}
         self._volume_spins = {}                              
-        self.setWindowTitle("Настройки ресурсов")
+        self.setWindowTitle(tr("res_config.title"))
         self.setMinimumSize(760, 500)
+        self.resize(988, 650)                                                           
         self._setup_ui()
         self._load_data()
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
-        path_group = QGroupBox("Путь к папке ресурсов")
+        path_group = QGroupBox(tr("res_config.path_group"))
         pg = QHBoxLayout(path_group)
         self.path_edit = QLineEdit()
-        self.path_edit.setPlaceholderText("resources")
+        self.path_edit.setPlaceholderText(tr("res_config.path_placeholder"))
         pg.addWidget(self.path_edit, 1)
-        btn_browse = QPushButton("📁 Обзор")
+        btn_browse = QPushButton(tr("res_config.browse"))
         btn_browse.clicked.connect(self._browse_path)
         pg.addWidget(btn_browse)
         layout.addWidget(path_group)
 
-        info = QLabel(
-            "Структура: resources/default/... и resources/custom/...\n"
-            "Внутри каждой - bg/  cg/  sprites/  music/  sounds/ (одинаковая структура в обеих).\n"
-            "Разница: объявления (image/define) генерируются ТОЛЬКО для ресурсов из custom/ - "
-            "default/ считается уже объявленным где-то ещё и не дублируется в коде.\n"
-            "Спрайты можно раскладывать по подпапкам персонажей и вариаций, например:\n"
-            "resources/custom/sprites/us/normal/smile.png\n"
-            "Имена переменных генерируются из имён файлов (и пути подпапки). Ниже можно задать свои."
-        )
-        info.setStyleSheet("color: #888; font-size: 11px;")
+        info = QLabel(tr("res_config.info"))
+        info.setObjectName("hint_text")
         info.setWordWrap(True)
         layout.addWidget(info)
 
         if self.usage_store is not None:
-            self.fav_recent_check = QCheckBox("Показывать «Избранное» и «Недавние» вверху карусели ресурсов")
+            self.fav_recent_check = QCheckBox(tr("res_config.fav_recent_check"))
             self.fav_recent_check.setChecked(self.usage_store.enabled)
-            self.fav_recent_check.setStyleSheet("color:#ccc;")
+            self.fav_recent_check.setObjectName("hint_text_bright")
             self.fav_recent_check.toggled.connect(self._on_fav_recent_toggled)
             layout.addWidget(self.fav_recent_check)
 
-        og = QGroupBox("Переопределения имён, теги и использование")
+        og = QGroupBox(tr("res_config.overrides_group"))
         og_l = QVBoxLayout(og)
         self.table = QTableWidget()
         self.table.setColumnCount(8)
         self.table.setHorizontalHeaderLabels([
-            "Файл", "Источник", "Авто-переменная", "Своё имя", "Своя переменная",
-            "Теги", "Использование", "Громкость"
+            tr("res_config.col_file"), tr("res_config.col_source"), tr("res_config.col_auto_var"),
+            tr("res_config.col_custom_name"), tr("res_config.col_custom_var"),
+            tr("res_config.col_tags"), tr("res_config.col_usage"), tr("res_config.col_volume"),
         ])
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
@@ -88,23 +83,20 @@ class ResourcesConfigDialog(QDialog):
         og_l.addWidget(self.table)
 
         btn_row = QHBoxLayout()
-        save_btn = QPushButton("💾 Сохранить переопределения")
+        save_btn = QPushButton(tr("res_config.save_overrides"))
         save_btn.clicked.connect(self._save_overrides)
         btn_row.addWidget(save_btn)
         btn_row.addStretch()
-        export_btn = QPushButton("⬆ Экспорт в файл...")
-        export_btn.setToolTip("Сохранить набор переопределённых имён в отдельный JSON-файл, "
-                               "чтобы перенести в другой проект или сделать резервную копию.")
+        export_btn = QPushButton(tr("res_config.export_to_file"))
+        export_btn.setToolTip(tr("res_config.export_tooltip"))
         export_btn.clicked.connect(self._export_overrides)
         btn_row.addWidget(export_btn)
-        import_btn = QPushButton("⬇ Импорт из файла...")
-        import_btn.setToolTip("Загрузить переопределённые имена из файла, ранее сохранённого "
-                               "через «Экспорт в файл».")
+        import_btn = QPushButton(tr("res_config.import_from_file"))
+        import_btn.setToolTip(tr("res_config.import_tooltip"))
         import_btn.clicked.connect(self._import_overrides)
         btn_row.addWidget(import_btn)
-        reset_btn = QPushButton("🗑 Сбросить переопределения")
-        reset_btn.setToolTip("Полностью удалить все свои имена/переменные - ресурсы вернутся "
-                              "к автоматически сгенерированным именам.")
+        reset_btn = QPushButton(tr("res_config.reset_overrides"))
+        reset_btn.setToolTip(tr("res_config.reset_tooltip"))
         reset_btn.setObjectName("btn_secondary")
         reset_btn.clicked.connect(self._reset_overrides)
         btn_row.addWidget(reset_btn)
@@ -147,10 +139,7 @@ class ResourcesConfigDialog(QDialog):
                     spin.setDecimals(2)
                     current = self.rm.get_volume(e.rel_path)
                     spin.setValue(current if current is not None else 1.0)
-                    spin.setToolTip(
-                        "Громкость по умолчанию для этого трека/канала (0.0–1.0).\n"
-                        "Если оставить 1.00 - параметр volume не попадёт в сгенерированный код."
-                    )
+                    spin.setToolTip(tr("res_config.volume_tooltip"))
                     self.table.setCellWidget(row, 7, spin)
                     self._volume_spins[row] = (e.rel_path, spin)
                 else:
@@ -167,10 +156,10 @@ class ResourcesConfigDialog(QDialog):
         count = len(self._usage_index.get(var_name, []))
         btn = QPushButton(f"🔍 {count}" if count else "🔍 0")
         btn.setObjectName("btn_secondary")
-        btn.setToolTip("Показать все места использования этого ресурса и перейти к ноде")
+        btn.setToolTip(tr("res_config.usage_tooltip"))
         if self.project is None:
             btn.setEnabled(False)
-            btn.setToolTip("Недоступно: проект не передан в диалог")
+            btn.setToolTip(tr("res_config.usage_unavailable"))
 
         def on_click():
             refs = self._usage_index.get(var_name, [])
@@ -190,7 +179,7 @@ class ResourcesConfigDialog(QDialog):
     def _make_tags_button(self, var_name: str, display_name: str) -> QPushButton:
         def label():
             keys = self.tags_store.get_tags_for(var_name)
-            return f"🏷 {len(keys)}" if keys else "🏷 Теги..."
+            return f"🏷 {len(keys)}" if keys else tr("res_config.tags_button")
 
         btn = QPushButton(label())
         btn.setObjectName("btn_secondary")
@@ -204,7 +193,7 @@ class ResourcesConfigDialog(QDialog):
         return btn
 
     def _browse_path(self):
-        d = QFileDialog.getExistingDirectory(self, "Выберите папку ресурсов")
+        d = QFileDialog.getExistingDirectory(self, tr("res_config.pick_folder"))
         if d:
             self.path_edit.setText(d)
 
@@ -224,7 +213,7 @@ class ResourcesConfigDialog(QDialog):
                 spin_rel, spin = self._volume_spins[row]
                 value = round(spin.value(), 2)
                 self.rm.set_volume(spin_rel, None if abs(value - 1.0) < 1e-6 else value)
-        QMessageBox.information(self, "Готово", "Переопределения сохранены")
+        QMessageBox.information(self, tr("res_config.done_title"), tr("res_config.overrides_saved"))
 
     def _export_overrides(self):
                                                                       
@@ -241,37 +230,34 @@ class ResourcesConfigDialog(QDialog):
                 self.rm.set_volume(spin_rel, None if abs(value - 1.0) < 1e-6 else value)
 
         if not self.rm.config.overrides:
-            QMessageBox.information(self, "Нечего экспортировать",
-                                     "Список переопределений пуст - нет ни одного "
-                                     "своего имени или переменной.")
+            QMessageBox.information(self, tr("res_config.nothing_to_export_title"),
+                                     tr("res_config.overrides_empty"))
             return
 
         path, _ = QFileDialog.getSaveFileName(
-            self, "Экспорт переопределений", "resource_overrides.json",
-            "JSON (*.json);;Все файлы (*)"
+            self, tr("res_config.export_title"), "resource_overrides.json",
+            f"JSON (*.json);;{tr('res_config.all_files')} (*)"
         )
         if not path:
             return
         try:
             self.rm.export_overrides(path)
-            QMessageBox.information(self, "Готово",
-                                     f"Экспортировано {len(self.rm.config.overrides)} переопределений в:\n{path}")
+            QMessageBox.information(self, tr("res_config.done_title"),
+                                     tr("res_config.exported_text", count=len(self.rm.config.overrides), path=path))
         except Exception as e:
-            QMessageBox.critical(self, "Ошибка экспорта", str(e))
+            QMessageBox.critical(self, tr("res_config.export_error_title"), str(e))
 
     def _import_overrides(self):
         path, _ = QFileDialog.getOpenFileName(
-            self, "Импорт переопределений", "",
-            "JSON (*.json);;Все файлы (*)"
+            self, tr("res_config.import_title"), "",
+            f"JSON (*.json);;{tr('res_config.all_files')} (*)"
         )
         if not path:
             return
 
         reply = QMessageBox.question(
-            self, "Как объединить?",
-            "Добавить импортированные переопределения к текущим "
-            "(совпадающие файлы будут перезаписаны)?\n\n"
-            "Да - добавить/обновить.\nНет - полностью заменить текущий список.",
+            self, tr("res_config.merge_title"),
+            tr("res_config.merge_text"),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel
         )
         if reply == QMessageBox.StandardButton.Cancel:
@@ -283,19 +269,17 @@ class ResourcesConfigDialog(QDialog):
             self.rm.save_config()
             self.rm.scan()                                                                          
             self._load_data()
-            QMessageBox.information(self, "Готово", f"Импортировано {count} переопределений.")
+            QMessageBox.information(self, tr("res_config.done_title"), tr("res_config.imported_text", count=count))
         except Exception as e:
-            QMessageBox.critical(self, "Ошибка импорта", str(e))
+            QMessageBox.critical(self, tr("res_config.import_error_title"), str(e))
 
     def _reset_overrides(self):
         if not self.rm.config.overrides:
-            QMessageBox.information(self, "Нечего сбрасывать", "Список переопределений уже пуст.")
+            QMessageBox.information(self, tr("res_config.nothing_to_reset_title"), tr("res_config.overrides_already_empty"))
             return
         reply = QMessageBox.question(
-            self, "Сбросить переопределения?",
-            f"Удалить все {len(self.rm.config.overrides)} переопределённых имён/переменных? "
-            "Ресурсы вернутся к автоматически сгенерированным именам.\n\n"
-            "Это действие нельзя отменить.",
+            self, tr("res_config.reset_confirm_title"),
+            tr("res_config.reset_confirm_text", count=len(self.rm.config.overrides)),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
@@ -305,7 +289,7 @@ class ResourcesConfigDialog(QDialog):
         self.rm.save_config()
         self.rm.scan()
         self._load_data()
-        QMessageBox.information(self, "Готово", "Все переопределения сброшены.")
+        QMessageBox.information(self, tr("res_config.done_title"), tr("res_config.reset_done_text"))
 
     def _on_ok(self):
         new_path = self.path_edit.text().strip()

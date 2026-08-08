@@ -5,6 +5,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal
 
 from core.spellcheck_scanner import LineIssues
+from core.i18n import tr
 
 _KIND_ICON = {"spelling": "✍", "repeat": "🔁", "punctuation": "␣", "tag": "🏷"}
 
@@ -22,14 +23,14 @@ class SpellcheckReportDialog(QDialog):
         self.diagnostics = diagnostics
         self.whitelist_store = whitelist_store
         self.base_dir = base_dir
-        self.setWindowTitle("Проверка реплик")
+        self.setWindowTitle(tr("spellcheck.title"))
         self.setMinimumSize(700, 560)
         layout = QVBoxLayout(self)
 
         self._add_diagnostics_banner(layout)
 
         total_issues = sum(len(r.issues) for r in results)
-        layout.addWidget(QLabel(f"Реплик с замечаниями: {len(results)}  ·  всего замечаний: {total_issues}"))
+        layout.addWidget(QLabel(tr("spellcheck.summary", lines=len(results), issues=total_issues)))
 
         self.lst = QListWidget()
         for r in results:
@@ -38,29 +39,29 @@ class SpellcheckReportDialog(QDialog):
             more = f" (+{len(r.issues) - 3})" if len(r.issues) > 3 else ""
             item = QListWidgetItem(f"{kinds}  {r.breadcrumb} - {r.char_label}: «{r.text_preview}»\n{first_msgs}{more}")
             item.setData(Qt.ItemDataRole.UserRole, r)
-            item.setToolTip("Двойной клик - перейти к ноде")
+            item.setToolTip(tr("spellcheck.dblclick_tooltip"))
             self.lst.addItem(item)
         self.lst.itemDoubleClicked.connect(self._on_activate)
         self.lst.currentItemChanged.connect(self._on_selection_changed)
         layout.addWidget(self.lst, 1)
 
         if not results:
-            layout.addWidget(QLabel("Замечаний не найдено 🎉"))
+            layout.addWidget(QLabel(tr("spellcheck.none_found")))
 
-        layout.addWidget(QLabel("Опечатки в выбранной реплике - можно сразу добавить в личный словарь:"))
+        layout.addWidget(QLabel(tr("spellcheck.words_hint")))
         self.words_frame = QFrame()
         self.words_layout = QHBoxLayout(self.words_frame)
         self.words_layout.setContentsMargins(0, 0, 0, 0)
-        self.words_layout.addWidget(QLabel("(выберите реплику выше)"))
+        self.words_layout.addWidget(QLabel(tr("spellcheck.select_line_above")))
         self.words_layout.addStretch()
         layout.addWidget(self.words_frame)
 
         btn_row = QHBoxLayout()
-        go_btn = QPushButton("➡ Перейти к ноде")
+        go_btn = QPushButton(tr("spellcheck.go_to_node"))
         go_btn.clicked.connect(lambda: self._on_activate(self.lst.currentItem()))
         btn_row.addWidget(go_btn)
-        btn_rescan = QPushButton("🔄 Пересканировать")
-        btn_rescan.setToolTip("Например, после добавления слов в словарь")
+        btn_rescan = QPushButton(tr("spellcheck.rescan"))
+        btn_rescan.setToolTip(tr("spellcheck.rescan_tooltip"))
         btn_rescan.clicked.connect(self._on_rescan)
         btn_row.addWidget(btn_rescan)
         btn_row.addStretch()
@@ -82,38 +83,22 @@ class SpellcheckReportDialog(QDialog):
         if ru_ok and not en_ok and not d["import_ok"]:
                                                                                   
                                                                           
-            text = (
-                "ℹ Орфография для русского проверяется через pymorphy3. Для "
-                "английского языка библиотека pyspellchecker не установлена "
-                "(pip install pyspellchecker)."
-            )
+            text = tr("spellcheck.banner_ru_only")
             color, fg = "#152233", "#9fd6ff"
         elif not d.get("pymorphy_import_ok") and not d["import_ok"]:
-            text = (
-                "ℹ Ни pymorphy3, ни pyspellchecker не установлены - орфография по "
-                "словарю не проверяется (pip install pymorphy3 pymorphy3-dicts-ru "
-                "pyspellchecker)."
-            )
+            text = tr("spellcheck.banner_none")
             color, fg = "#2a1f14", "#ffb84d"
         else:
             problems = []
             if not ru_ok:
                 morph_err = d.get("pymorphy_import_error") or self.diagnostics["dictionaries"]["ru"]["error"]
-                problems.append(f"русский недоступен ({morph_err or 'причина неизвестна'})")
+                problems.append(tr("spellcheck.ru_unavailable", reason=morph_err or tr("spellcheck.reason_unknown")))
             if not en_ok:
                 en_err = d["dictionaries"]["en"]["error"]
-                problems.append(f"английский недоступен ({en_err or 'pyspellchecker не установлен'})")
-            text = (
-                "⚠ Проверка орфографии работает частично: " + "; ".join(problems) + ". "
-                "Если это собранный .exe - словари/данные pymorphy3 или "
-                "pyspellchecker не были включены в сборку (это файлы данных, "
-                "PyInstaller их не подхватывает автоматически)."
-            )
+                problems.append(tr("spellcheck.en_unavailable", reason=en_err or tr("spellcheck.pyspellchecker_missing")))
+            text = tr("spellcheck.banner_partial", problems="; ".join(problems))
             color, fg = "#2a1f14", "#ffb84d"
-        text += (
-            " Доступны технические проверки: незакрытые теги {b}/{i}/{color}, "
-            "повторы слов, лишние пробелы и знаки препинания."
-        )
+        text += tr("spellcheck.banner_tech_checks")
         note = QLabel(text)
         note.setWordWrap(True)
         note.setStyleSheet(f"color:{fg}; background:{color}; padding:6px; border-radius:4px;")
@@ -126,24 +111,24 @@ class SpellcheckReportDialog(QDialog):
                 item.widget().deleteLater()
 
         if current is None:
-            self.words_layout.addWidget(QLabel("(выберите реплику выше)"))
+            self.words_layout.addWidget(QLabel(tr("spellcheck.select_line_above")))
             self.words_layout.addStretch()
             return
 
         r: LineIssues = current.data(Qt.ItemDataRole.UserRole)
         spelling_words = sorted({i.word for i in r.issues if i.kind == "spelling" and i.word})
         if not spelling_words:
-            self.words_layout.addWidget(QLabel("(в этой реплике нет замечаний по орфографии)"))
+            self.words_layout.addWidget(QLabel(tr("spellcheck.no_spelling_issues")))
         for word in spelling_words:
             btn = QPushButton(f"✚ «{word}»")
-            btn.setToolTip("Добавить это слово в личный словарь (больше не будет считаться опечаткой)")
+            btn.setToolTip(tr("spellcheck.add_word_tooltip"))
             btn.clicked.connect(lambda _=False, w=word, b=btn: self._add_word(w, b))
             self.words_layout.addWidget(btn)
         self.words_layout.addStretch()
 
     def _add_word(self, word: str, btn: QPushButton):
         self.whitelist_store.add(word, self.base_dir)
-        btn.setText(f"✓ «{word}» добавлено")
+        btn.setText(tr("spellcheck.word_added", word=word))
         btn.setEnabled(False)
 
     def _on_rescan(self):

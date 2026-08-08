@@ -116,7 +116,7 @@ def split_project(project: Project, rule: str, rm=None,
     синтетическая метка (_export_partN), а конец файла - либо `jump` на
     метку следующего файла, либо `return` для последнего. Первый файл всегда
     открывается меткой project.label_name (как и при экспорте в один файл) и
-    содержит блок define персонажей, если defines_in_first_file=True."""
+    содержит блок define персонажей, если defines_in_first_file=True."""         
     if rule not in SPLIT_RULES:
         raise ValueError(f"Неизвестное правило разбиения: {rule!r}")
     if not project.scenes:

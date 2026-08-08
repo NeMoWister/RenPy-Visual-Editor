@@ -4,6 +4,8 @@ from typing import Optional, List
 from enum import Enum
 import uuid
 
+from core.i18n import tr
+
 
 class NodeType(Enum):
     DIALOGUE = "dialogue"
@@ -129,6 +131,7 @@ class SceneNode:
     sprite_expression: Optional[str] = None
     sprite_position: SpritePosition = field(default_factory=SpritePosition)
     sprite_tag: Optional[str] = None
+    atl_script: str = ""
                                                                        
                                                                           
                                                                            
@@ -158,6 +161,8 @@ class SceneNode:
     color_tag: Optional[str] = None                                                               
     custom_template_id: str = ""
     custom_params: dict = field(default_factory=dict)
+    pos_x: Optional[float] = None
+    pos_y: Optional[float] = None
                                                                            
                                                                       
                                                                    
@@ -278,59 +283,62 @@ class SceneNode:
             txt = self.text[:50] + ("…" if len(self.text) > 50 else "")
             return f'📖 {txt}'
         elif t == NodeType.SHOW_BG:
-            return f'🖼 Фон: {self.bg_var or "-"}  [{self.transition}]'
+            atl = "  ⚙ATL" if self.atl_script.strip() else ""
+            return tr("preview.bg", var=self.bg_var or "-", trans=self.transition) + atl
         elif t == NodeType.SCENE:
-            return f'🎬 Сцена: {self.bg_var or "-"}  [{self.transition}]'
+            atl = "  ⚙ATL" if self.atl_script.strip() else ""
+            return tr("preview.scene", var=self.bg_var or "-", trans=self.transition) + atl
         elif t == NodeType.SHOW_SPRITE:
             expr = f" ({self.sprite_expression})" if self.sprite_expression else ""
-            trans = f"  [{self.transition}]" if self.transition else "  [без перехода]"
-            return f'👤 Спрайт: {self.sprite_var or "-"}{expr}{trans}'
+            trans = f"  [{self.transition}]" if self.transition else f"  [{tr('preview.no_transition')}]"
+            atl = "  ⚙ATL" if self.atl_script.strip() else ""
+            return tr("preview.sprite", var=self.sprite_var or "-", expr=expr, trans=trans) + atl
         elif t == NodeType.HIDE_SPRITE:
             if self.hide_group:
-                return f'👻 Скрыть: персонаж «{self.hide_group}» (все спрайты)'
-            return f'👻 Скрыть: {self.sprite_tag or self.sprite_var or "-"}'
+                return tr("preview.hide_char", name=self.hide_group)
+            return tr("preview.hide_sprite", var=self.sprite_tag or self.sprite_var or "-")
         elif t == NodeType.PLAY_MUSIC:
-            return f'🎵 Музыка: {self.music_var or "-"}'
+            return tr("preview.music", var=self.music_var or "-")
         elif t == NodeType.STOP_MUSIC:
-            return f'🔇 Стоп музыка'
+            return tr("preview.stop_music")
         elif t == NodeType.PLAY_SOUND:
-            return f'🔊 Звук: {self.sound_var or "-"}'
+            return tr("preview.sound", var=self.sound_var or "-")
         elif t == NodeType.SHOW_CG:
-            return f'🖼 CG: {self.cg_var or "-"}'
+            return tr("preview.cg", var=self.cg_var or "-")
         elif t == NodeType.HIDE_CG:
-            return f'🗑 Скрыть CG'
+            return tr("preview.hide_cg")
         elif t == NodeType.LABEL:
-            return f'🏷 Метка: {self.label_name}'
+            return tr("preview.label", name=self.label_name)
         elif t == NodeType.JUMP:
-            return f'➡ Прыжок: {self.jump_target}'
+            return tr("preview.jump", target=self.jump_target)
         elif t == NodeType.MENU:
-            return f'📋 Меню: {self.menu_prompt[:30]}'
+            return tr("preview.menu", prompt=self.menu_prompt[:30])
         elif t == NodeType.PYTHON:
             code_short = self.python_code[:40].replace('\n', ' ')
-            return f'🐍 Python: {code_short}'
+            return tr("preview.python", code=code_short)
         elif t == NodeType.PAUSE:
-            dur = str(self.pause_duration) if self.pause_duration > 0 else "клик"
-            return f'⏸ Пауза ({dur})'
+            dur = str(self.pause_duration) if self.pause_duration > 0 else tr("preview.pause_click")
+            return tr("preview.pause", dur=dur)
         elif t == NodeType.RETURN:
-            return '⏹ Return (выход в главное меню / возврат из call)'
+            return tr("preview.return")
         elif t == NodeType.COMMENT:
             return f'# {self.comment_text[:50]}'
         elif t == NodeType.WINDOW:
-            action = "Показать" if self.window_action == "show" else "Скрыть"
+            action = tr("preview.window_show") if self.window_action == "show" else tr("preview.window_hide")
             trans = f"  [{self.transition}]" if self.transition else ""
-            return f'🪟 Текстовое окно: {action}{trans}'
+            return tr("preview.window", action=action, trans=trans)
         elif t == NodeType.PLAY_AMBIENCE:
-            return f'🌬 Эмбиенс: {self.ambience_var or "-"}'
+            return tr("preview.ambience", var=self.ambience_var or "-")
         elif t == NodeType.STOP_AMBIENCE:
-            return f'🔇 Стоп эмбиенс'
+            return tr("preview.stop_ambience")
         elif t == NodeType.WITH_TRANSITION:
-            return f'✨ Эффект: with {self.transition or "-"}'
+            return tr("preview.with_transition", trans=self.transition or "-")
         elif t == NodeType.NVL_MODE:
-            labels = {"enter": "📖 Войти в NVL-режим", "clear": "📖 Очистить экран NVL", "exit": "💬 Вернуться в ADV"}
-            return labels.get(self.nvl_action, "📖 NVL")
+            labels = {"enter": tr("preview.nvl_enter"), "clear": tr("preview.nvl_clear"), "exit": tr("preview.nvl_exit")}
+            return labels.get(self.nvl_action, tr("preview.nvl_default"))
         elif t == NodeType.RAW:
             code_short = self.python_code[:50].replace('\n', ' ⏎ ')
-            return f'🧩 Импорт (неразпознано): {code_short}'
+            return tr("preview.raw", code=code_short)
         elif t == NodeType.CUSTOM:
             params_short = ", ".join(f"{k}={v}" for k, v in list(self.custom_params.items())[:3])
             return f'🧬 {self.custom_template_id or "?"}({params_short})'

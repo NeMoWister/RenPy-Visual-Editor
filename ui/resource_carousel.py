@@ -8,8 +8,10 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QEvent
 from PyQt6.QtGui import QPixmap
 from core.resource_manager import ResourceEntry
+from core.i18n import tr
 from core.composite_sprite_parser import CompositeSprite
 from ui.pixmap_cache import get_scaled, get_composite
+from ui.theme import theme_manager
 
 
 SCROLL_EXTRA = 14
@@ -25,8 +27,9 @@ class DragOverlay(QLabel):
     def __init__(self, parent):
         super().__init__(parent)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        _t = theme_manager.tokens()
         self.setStyleSheet(
-            "background: rgba(255,140,60,60); border: 2px dashed #ff8c3d; "
+            f"background: {_t.accent_soft}; border: 2px dashed {_t.accent_1}; "
             "border-radius: 8px; color: #fff; font-size: 13px; font-weight: bold;"
         )
         self.hide()
@@ -89,7 +92,7 @@ class ResourceCard(QFrame):
         self.preview = QLabel()
         self.preview.setFixedSize(thumb_size, thumb_size)
         self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.preview.setStyleSheet("background: #1a1a21; border-radius: 4px; border: 1px solid #3a3a46;")
+        self.preview.setObjectName("code_box")
 
         if self.show_favorite_star:
             self.star_btn = QPushButton(self.preview)
@@ -120,7 +123,7 @@ class ResourceCard(QFrame):
         name_label = QLabel(self.entry.display_name)
         name_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         name_label.setWordWrap(True)
-        name_label.setStyleSheet("font-size:10px; color:#aaa;")
+        name_label.setObjectName("hint_text")
         name_label.setMaximumWidth(thumb_size + 8)
         layout.addWidget(name_label)
         self._update_style()
@@ -134,21 +137,20 @@ class ResourceCard(QFrame):
         pm = get_scaled(self.entry.abs_path, self.thumb_size, self.thumb_size)
         if pm is not None:
             self.preview.setPixmap(pm)
-            self.preview.setStyleSheet("background: #1a1a21; border-radius: 4px; border: 1px solid #3a3a46;")
+            self.preview.setObjectName("code_box")
         else:
             self.preview.setText("🖼")
-            self.preview.setStyleSheet("background: #1a1a21; border-radius: 4px; border: 1px solid #3a3a46; font-size:24px;")
+            self.preview.setObjectName("code_box")
+            self.preview.setStyleSheet("font-size:24px;")
 
     def _update_style(self):
-        if self.selected:
-            self.setStyleSheet("""
-                QFrame#resource_card { background: #2a1a00; border: 2px solid #ff8c3d; border-radius: 6px; }
-            """)
-        else:
-            self.setStyleSheet("""
-                QFrame#resource_card { background: #22222a; border: 1px solid #3a3a46; border-radius: 6px; }
-                QFrame#resource_card:hover { border-color: #ff8c3d; background: #232330; }
-            """)
+                                                                 
+                                                                        
+                                                                
+                                                         
+        self.setProperty("selected", self.selected)
+        self.style().unpolish(self)
+        self.style().polish(self)
 
     def set_selected(self, val: bool):
         self.selected = val
@@ -164,7 +166,7 @@ class ResourceCard(QFrame):
             f"border-radius:11px; font-size:14px; border:none; }}"
             f"QPushButton:hover {{ background: rgba(40,30,10,200); color:#ffcf40; }}"
         )
-        self.star_btn.setToolTip("Убрать из избранного" if self.is_favorite else "Добавить в избранное")
+        self.star_btn.setToolTip(tr("carousel.remove_favorite") if self.is_favorite else tr("carousel.add_favorite"))
 
     def set_suppress_tooltip(self, suppress: bool):
         """Во время drag-n-drop поверх карусели наведение курсора над
@@ -209,27 +211,23 @@ class FolderCard(QFrame):
         self.icon = QLabel("📁")
         self.icon.setFixedSize(thumb_size, thumb_size)
         self.icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.icon.setStyleSheet("background: #1a1a21; border-radius: 4px; border: 1px solid #3a3a46; font-size:36px;")
+        self.icon.setObjectName("code_box")
+        self.icon.setStyleSheet("font-size:36px;")
         layout.addWidget(self.icon)
 
         name_label = QLabel(folder_name)
         name_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         name_label.setWordWrap(True)
-        name_label.setStyleSheet("font-size:11px; color:#ddd; font-weight:bold;")
+        name_label.setObjectName("hint_text_bright")
+        name_label.setStyleSheet("font-weight:bold;")
         name_label.setMaximumWidth(thumb_size + 8)
         layout.addWidget(name_label)
         self._update_style()
 
     def _update_style(self):
-        if self.selected:
-            self.setStyleSheet("""
-                QFrame#folder_card { background: #2a1a00; border: 2px solid #ff8c3d; border-radius: 6px; }
-            """)
-        else:
-            self.setStyleSheet("""
-                QFrame#folder_card { background: #22222a; border: 1px solid #3a3a46; border-radius: 6px; }
-                QFrame#folder_card:hover { border-color: #ff8c3d; background: #232330; }
-            """)
+        self.setProperty("selected", self.selected)
+        self.style().unpolish(self)
+        self.style().polish(self)
 
     def set_selected(self, val: bool):
         self.selected = val
@@ -280,7 +278,7 @@ class CharacterGroupPicker(QWidget):
         outer.addLayout(row)
 
         none_row = QHBoxLayout()
-        self.btn_none = QPushButton("✕ Убрать выбор")
+        self.btn_none = QPushButton(tr("carousel.clear_selection"))
         self.btn_none.setObjectName("btn_secondary")
         self.btn_none.setFixedHeight(36)
         self.btn_none.clicked.connect(self._clear_selection)
@@ -414,9 +412,8 @@ class FolderResourceCarousel(QWidget):
             self._refresh_view()
         if skipped:
             QMessageBox.warning(
-                self, "Не удалось импортировать",
-                "Эти файлы пропущены (неподходящее расширение для этой категории):\n"
-                + "\n".join(skipped)
+                self, tr("carousel.import_failed_title"),
+                tr("carousel.import_failed_text", files="\n".join(skipped))
             )
         event.acceptProposedAction()
 
@@ -454,7 +451,7 @@ class FolderResourceCarousel(QWidget):
         outer.addLayout(row)
 
         none_row = QHBoxLayout()
-        self.btn_none = QPushButton("✕ Убрать выбор")
+        self.btn_none = QPushButton(tr("carousel.clear_selection"))
         self.btn_none.setObjectName("btn_secondary")
         self.btn_none.setFixedHeight(36)
         self.btn_none.clicked.connect(self._clear_selection)
@@ -518,21 +515,22 @@ class FolderResourceCarousel(QWidget):
             btn.setFlat(True)
             is_last = (i == len(crumbs) - 1)
             btn.setEnabled(not is_last)
+            _t = theme_manager.tokens()
             btn.setStyleSheet(f"""
                 QPushButton {{
-                    color: {'#ff8c3d' if is_last else '#9aa'};
+                    color: {_t.accent_2 if is_last else _t.text_dim};
                     font-weight: {'bold' if is_last else 'normal'};
                     border: none; padding: 2px 4px; text-align: left;
                     background: transparent;
                 }}
-                QPushButton:hover {{ color: #ffa020; }}
-                QPushButton:disabled {{ color: #ff8c3d; }}
+                QPushButton:hover {{ color: {_t.accent_1}; }}
+                QPushButton:disabled {{ color: {_t.accent_2}; }}
             """)
             btn.clicked.connect(lambda _=None, p=path: self._go_to(p))
             self.breadcrumb_row.addWidget(btn)
             if not is_last:
                 sep = QLabel("›")
-                sep.setStyleSheet("color:#666;")
+                sep.setObjectName("hint_text")
                 self.breadcrumb_row.addWidget(sep)
         self.breadcrumb_row.addStretch()
 
@@ -647,8 +645,8 @@ class ResourceCarousel(QWidget):
             header.addWidget(title)
         header.addStretch()
 
-        self.group_label = QLabel("Группировать:")
-        self.group_label.setStyleSheet("color:#888; font-size:11px;")
+        self.group_label = QLabel(tr("carousel.group_label"))
+        self.group_label.setObjectName("hint_text")
         header.addWidget(self.group_label)
         self.group_combo = QComboBox()
         self.group_combo.setFixedWidth(150)
@@ -661,10 +659,11 @@ class ResourceCarousel(QWidget):
         self.search_edit = QLineEdit()
         self.search_edit.setPlaceholderText("🔎 Поиск по названию...")
         self.search_edit.setClearButtonEnabled(True)
+        self.search_edit.setObjectName("dark_field")
+        _t = theme_manager.tokens()
         self.search_edit.setStyleSheet(
-            "QLineEdit { background:#232330; color:#eee; border:1px solid #3a3a46; "
-            "border-radius:4px; padding:3px 6px; font-size:11px; }"
-            "QLineEdit:focus { border-color:#ff8c3d; }"
+            f"QLineEdit#dark_field {{ font-size:11px; }}"
+            f"QLineEdit#dark_field:focus {{ border-color:{_t.accent_1}; }}"
         )
         self.search_edit.textChanged.connect(self._on_search_changed)
         search_row.addWidget(self.search_edit)
@@ -693,7 +692,7 @@ class ResourceCarousel(QWidget):
         outer.addLayout(row)
 
         none_row = QHBoxLayout()
-        self.btn_none = QPushButton("✕ Убрать выбор")
+        self.btn_none = QPushButton(tr("carousel.clear_selection"))
         self.btn_none.setObjectName("btn_secondary")
         self.btn_none.setFixedHeight(36)
         self.btn_none.clicked.connect(self._clear_selection)
@@ -733,7 +732,7 @@ class ResourceCarousel(QWidget):
 
         self.group_combo.blockSignals(True)
         self.group_combo.clear()
-        self.group_combo.addItem("Без группировки", None)
+        self.group_combo.addItem(tr("carousel.no_grouping"), None)
         for cat in visible_cats:
             self.group_combo.addItem(cat.name, cat.id)
         self.group_combo.blockSignals(False)
@@ -780,11 +779,11 @@ class ResourceCarousel(QWidget):
             cat_name = cat.name if cat else ""
             btn = QPushButton(f"‹ Все теги «{cat_name}»")
             btn.setFlat(True)
-            btn.setStyleSheet("QPushButton { color:#ff8c3d; border:none; text-align:left; } QPushButton:hover { color:#ffa020; }")
+            btn.setObjectName("link_btn")
             btn.clicked.connect(self._back_to_tags)
             self.nav_row.addWidget(btn)
             sep = QLabel(f"›  {self.current_tag}")
-            sep.setStyleSheet("color:#9aa;")
+            sep.setObjectName("hint_text")
             self.nav_row.addWidget(sep)
         self.nav_row.addStretch()
 
@@ -898,7 +897,8 @@ class ResourceCarousel(QWidget):
                 if not group:
                     continue
                 sep = QLabel(label_text)
-                sep.setStyleSheet("color:#ff8c3d; font-size:11px; font-weight:bold; padding:0 6px;")
+                sep.setObjectName("accent_caption")
+                sep.setStyleSheet("font-size:11px; padding:0 6px;")
                 sep.setFixedHeight(self.thumb_size + ResourceCard.LABEL_HEIGHT + 14)
                 sep.setAlignment(Qt.AlignmentFlag.AlignVCenter)
                 self.cards.append(sep)
@@ -911,7 +911,7 @@ class ResourceCarousel(QWidget):
                     count += 1
             divider = QFrame()
             divider.setFrameShape(QFrame.Shape.VLine)
-            divider.setStyleSheet("color:#3a3a46;")
+            divider.setObjectName("hint_text")
             divider.setFixedHeight(self.thumb_size + ResourceCard.LABEL_HEIGHT + 14)
             self.cards.append(divider)
             self.container_layout.addWidget(divider)
@@ -931,8 +931,9 @@ class ResourceCarousel(QWidget):
             count += 1
 
         if self.search_text and not visible_entries and not tag_folders:
-            empty = QLabel("Ничего не найдено")
-            empty.setStyleSheet("color:#777; font-size:11px; padding:0 6px;")
+            empty = QLabel(tr("carousel.nothing_found"))
+            empty.setObjectName("hint_text")
+            empty.setStyleSheet("padding:0 6px;")
             self.cards.append(empty)
             self.container_layout.addWidget(empty)
             count += 1
@@ -1056,9 +1057,8 @@ class ResourceCarousel(QWidget):
             self.selection_changed.emit(self.selected_entry)
         if skipped:
             QMessageBox.warning(
-                self, "Не удалось импортировать",
-                "Эти файлы пропущены (неподходящее расширение для этой категории):\n"
-                + "\n".join(skipped)
+                self, tr("carousel.import_failed_title"),
+                tr("carousel.import_failed_text", files="\n".join(skipped))
             )
         event.acceptProposedAction()
 
@@ -1090,7 +1090,7 @@ class CompositeSpriteCard(QFrame):
         self.preview = QLabel()
         self.preview.setFixedSize(thumb_size, thumb_size)
         self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.preview.setStyleSheet("background: #1a1a21; border-radius: 4px; border: 1px solid #3a3a46;")
+        self.preview.setObjectName("code_box")
         self.preview.setText("…")
         self.preview.setStyleSheet(self.preview.styleSheet() + "color:#555; font-size:11px;")
         layout.addWidget(self.preview)
@@ -1098,7 +1098,7 @@ class CompositeSpriteCard(QFrame):
         name_label = QLabel(self.sprite.display_name)
         name_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         name_label.setWordWrap(True)
-        name_label.setStyleSheet("font-size:10px; color:#aaa;")
+        name_label.setObjectName("hint_text")
         name_label.setMaximumWidth(thumb_size + 8)
         layout.addWidget(name_label)
         self._update_style()
@@ -1115,21 +1115,20 @@ class CompositeSpriteCard(QFrame):
                             target_w=self.thumb_size, target_h=self.thumb_size)
         if pm is not None:
             self.preview.setPixmap(pm)
-            self.preview.setStyleSheet("background: #1a1a21; border-radius: 4px; border: 1px solid #3a3a46;")
+            self.preview.setObjectName("code_box")
         else:
             self.preview.setText("🖼")
-            self.preview.setStyleSheet("background: #1a1a21; border-radius: 4px; border: 1px solid #3a3a46; font-size:24px;")
+            self.preview.setObjectName("code_box")
+            self.preview.setStyleSheet("font-size:24px;")
 
     def _update_style(self):
-        if self.selected:
-            self.setStyleSheet("""
-                QFrame#resource_card { background: #2a1a00; border: 2px solid #ff8c3d; border-radius: 6px; }
-            """)
-        else:
-            self.setStyleSheet("""
-                QFrame#resource_card { background: #22222a; border: 1px solid #3a3a46; border-radius: 6px; }
-                QFrame#resource_card:hover { border-color: #ff8c3d; background: #232330; }
-            """)
+                                                                 
+                                                                        
+                                                                
+                                                         
+        self.setProperty("selected", self.selected)
+        self.style().unpolish(self)
+        self.style().polish(self)
 
     def set_selected(self, val: bool):
         self.selected = val
@@ -1140,7 +1139,10 @@ class CompositeSpriteCard(QFrame):
         super().mousePressEvent(event)
 
 
-POSITION_LABELS = {"far": "Дальний план (far)", "close": "Крупный план (close)", "normal": "Средний план (normal)"}
+def _position_labels():
+    return {"far": tr("carousel.pos_far"), "close": tr("carousel.pos_close"), "normal": tr("carousel.pos_normal")}
+
+POSITION_LABELS = _position_labels
 
 
 class CompositeSpriteCarousel(QWidget):
@@ -1189,7 +1191,7 @@ class CompositeSpriteCarousel(QWidget):
         outer.addLayout(row)
 
         none_row = QHBoxLayout()
-        self.btn_none = QPushButton("✕ Убрать выбор")
+        self.btn_none = QPushButton(tr("carousel.clear_selection"))
         self.btn_none.setObjectName("btn_secondary")
         self.btn_none.setFixedHeight(36)
         self.btn_none.clicked.connect(self._clear_selection)
@@ -1238,28 +1240,29 @@ class CompositeSpriteCarousel(QWidget):
             crumbs.append((self.current_path[0], self.current_path[:1]))
         if len(self.current_path) >= 2:
             pos = self.current_path[1]
-            crumbs.append((POSITION_LABELS.get(pos, pos), self.current_path[:2]))
+            crumbs.append((_position_labels().get(pos, pos), self.current_path[:2]))
 
         for i, (text, path) in enumerate(crumbs):
             btn = QPushButton(text)
             btn.setFlat(True)
             is_last = (i == len(crumbs) - 1)
             btn.setEnabled(not is_last)
+            _t = theme_manager.tokens()
             btn.setStyleSheet(f"""
                 QPushButton {{
-                    color: {'#ff8c3d' if is_last else '#9aa'};
+                    color: {_t.accent_2 if is_last else _t.text_dim};
                     font-weight: {'bold' if is_last else 'normal'};
                     border: none; padding: 2px 4px; text-align: left;
                     background: transparent;
                 }}
-                QPushButton:hover {{ color: #ffa020; }}
-                QPushButton:disabled {{ color: #ff8c3d; }}
+                QPushButton:hover {{ color: {_t.accent_1}; }}
+                QPushButton:disabled {{ color: {_t.accent_2}; }}
             """)
             btn.clicked.connect(lambda _=None, p=path: self._go_to(p))
             self.breadcrumb_row.addWidget(btn)
             if not is_last:
                 sep = QLabel("›")
-                sep.setStyleSheet("color:#666;")
+                sep.setObjectName("hint_text")
                 self.breadcrumb_row.addWidget(sep)
         self.breadcrumb_row.addStretch()
 
@@ -1294,7 +1297,7 @@ class CompositeSpriteCarousel(QWidget):
                                                                  
             character = self.current_path[0]
             for pos in self.rm.get_composite_positions(character):
-                card = FolderCard(POSITION_LABELS.get(pos, pos), self.thumb_size)
+                card = FolderCard(_position_labels().get(pos, pos), self.thumb_size)
                 card.folder_name = pos                                                                 
                 card.clicked.connect(self._enter)
                 self.cards.append(card)

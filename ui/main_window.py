@@ -9,7 +9,8 @@ from PyQt6.QtWidgets import (
     QLabel, QPushButton, QListWidget, QListWidgetItem, QGroupBox,
     QToolBar, QStatusBar, QFileDialog, QMessageBox, QInputDialog,
     QScrollArea, QFrame, QLineEdit, QDialog, QStyle, QSlider, QStackedWidget,
-    QAbstractItemView, QMenu, QColorDialog, QProgressDialog
+    QAbstractItemView, QMenu, QColorDialog, QProgressDialog, QToolButton,
+    QApplication
 )
 from PyQt6.QtCore import Qt, QSize, pyqtSignal, QTimer, QThread
 from PyQt6.QtGui import QAction, QKeySequence, QIcon, QFont, QColor, QBrush, QPainter, QShortcut
@@ -20,10 +21,36 @@ from core.project_manager import ProjectManager, project_to_dict, project_from_d
 from core.undo_manager import UndoManager
 from core.code_generator import generate_full_script, generate_defines_only
 from core.scene_state import compute_state_up_to
+from core import atl as atl_engine
+from core import transitions
+from core.custom_transitions import resolve as resolve_custom_transition
+
+_VISUAL_TRANSITION_NODE_TYPES = (
+    NodeType.SCENE, NodeType.SHOW_BG, NodeType.SHOW_CG, NodeType.SHOW_SPRITE,
+    NodeType.HIDE_SPRITE, NodeType.HIDE_CG, NodeType.WITH_TRANSITION,
+)
+
+
+def _resolve_mask_path(rm, rel_path: str) -> Optional[str]:
+    """Разрешает относительный путь маски кастомного ImageDissolve (см.
+    core/transitions.py) в абсолютный файл на диске - ищет сперва в
+    resources/custom/transitions/, затем в resources/default/transitions/,
+    а если это уже абсолютный путь (например, файл ещё не был "импортирован"
+    через диалог перехода) - использует его как есть."""
+    if not rel_path or rm is None:
+        return None
+    if os.path.isabs(rel_path) and os.path.isfile(rel_path):
+        return rel_path
+    for source in ("custom", "default"):
+        candidate = os.path.join(rm.get_source_root(source), rel_path)
+        if os.path.isfile(candidate):
+            return candidate
+    return None
 from core import presentation_engine
 
 from ui.glass_panel import GlassPanel
 from ui.node_editor import NodeEditor
+from ui.node_graph_view import NodeGraphCanvas, GraphWindow
 from ui.characters_dialog import CharactersDialog
 from ui.code_preview import CodePreviewDialog
 from ui.resources_dialog import ResourcesConfigDialog
@@ -57,6 +84,7 @@ from PyQt6.QtGui import QPixmap
 
 
 from core.paths import get_base_dir
+from core.i18n import tr, plural
 
 BASE_DIR = get_base_dir()
 
@@ -111,32 +139,36 @@ def _group_folder_icon(color: str, collapsed: bool) -> QIcon:
     return QIcon(pm)
 
 
-_NODE_TYPE_HINTS = {
-    NodeType.DIALOGUE: "💬 Реплика персонажа - станет строкой вида: имя_переменной \"текст\"",
-    NodeType.NARRATION: "📖 Повествование от автора - строка текста без указания персонажа",
-    NodeType.SHOW_BG: "🖼 Показывает фон (show bg с опциональным переходом)",
-    NodeType.SCENE: "🎬 Полная смена сцены (scene - сбрасывает все показанные спрайты)",
-    NodeType.SHOW_SPRITE: "🧍 Показывает спрайт персонажа в заданной позиции",
-    NodeType.HIDE_SPRITE: "🚫 Скрывает ранее показанный спрайт",
-    NodeType.SHOW_CG: "🖼 Показывает CG-иллюстрацию",
-    NodeType.HIDE_CG: "🗑 Скрывает CG-иллюстрацию",
-    NodeType.PLAY_MUSIC: "🎵 Запускает фоновую музыку (play music)",
-    NodeType.STOP_MUSIC: "🔇 Останавливает музыку",
-    NodeType.PLAY_SOUND: "🔊 Проигрывает звуковой эффект один раз",
-    NodeType.PLAY_AMBIENCE: "🌬 Запускает фоновый эмбиенс-звук",
-    NodeType.STOP_AMBIENCE: "🔇 Останавливает эмбиенс",
-    NodeType.LABEL: "🏷 Метка - точка, на которую можно перейти через jump",
-    NodeType.JUMP: "➡ Безусловный переход на другую метку",
-    NodeType.MENU: "📋 Меню выбора для игрока",
-    NodeType.PYTHON: "🐍 Произвольный Python-код ($ или python:)",
-    NodeType.PAUSE: "⏸ Пауза (по времени или до клика игрока)",
-    NodeType.RETURN: "⏹ Возврат из label (return)",
-    NodeType.COMMENT: "# Комментарий - не попадает в игру, только для заметок в редакторе",
-    NodeType.WINDOW: "🪟 Управление текстовым окном (window show/hide/auto)",
-    NodeType.WITH_TRANSITION: "🎞 Отдельная команда перехода (with transition)",
-    NodeType.RAW: "🧩 Нераспознанный при импорте код - сохранён как есть",
-    NodeType.CUSTOM: "🧬 Пользовательская нода по вашему шаблону (Проект → Шаблоны пользовательских нод)",
-}
+def _node_type_hints():
+    return {
+        NodeType.DIALOGUE: tr("node_hint.dialogue"),
+        NodeType.NARRATION: tr("node_hint.narration"),
+        NodeType.SHOW_BG: tr("node_hint.show_bg"),
+        NodeType.SCENE: tr("node_hint.scene"),
+        NodeType.SHOW_SPRITE: tr("node_hint.show_sprite"),
+        NodeType.HIDE_SPRITE: tr("node_hint.hide_sprite"),
+        NodeType.SHOW_CG: tr("node_hint.show_cg"),
+        NodeType.HIDE_CG: tr("node_hint.hide_cg"),
+        NodeType.PLAY_MUSIC: tr("node_hint.play_music"),
+        NodeType.STOP_MUSIC: tr("node_hint.stop_music"),
+        NodeType.PLAY_SOUND: tr("node_hint.play_sound"),
+        NodeType.PLAY_AMBIENCE: tr("node_hint.play_ambience"),
+        NodeType.STOP_AMBIENCE: tr("node_hint.stop_ambience"),
+        NodeType.LABEL: tr("node_hint.label"),
+        NodeType.JUMP: tr("node_hint.jump"),
+        NodeType.MENU: tr("node_hint.menu"),
+        NodeType.PYTHON: tr("node_hint.python"),
+        NodeType.PAUSE: tr("node_hint.pause"),
+        NodeType.RETURN: tr("node_hint.return"),
+        NodeType.COMMENT: tr("node_hint.comment"),
+        NodeType.WINDOW: tr("node_hint.window"),
+        NodeType.WITH_TRANSITION: tr("node_hint.with_transition"),
+        NodeType.RAW: tr("node_hint.raw"),
+        NodeType.CUSTOM: tr("node_hint.custom"),
+    }
+
+
+_NODE_TYPE_HINTS = None                                                            
 
 
 class _SpellcheckWorker(QThread):
@@ -220,7 +252,7 @@ class SceneListPanel(QWidget):
         layout.setSpacing(6)
 
                      
-        scenes_group = QGroupBox("Сцены")
+        scenes_group = QGroupBox(tr("mw.scenes_group"))
         self.scenes_group = scenes_group
         sg_layout = QVBoxLayout(scenes_group)
         sg_layout.setContentsMargins(4, 8, 4, 4)
@@ -231,20 +263,20 @@ class SceneListPanel(QWidget):
         sg_layout.addWidget(self.scene_list)
 
         sc_btn_row = QHBoxLayout()
-        btn_add_scene = QPushButton("Новый label")
+        btn_add_scene = QPushButton(tr("mw.new_label_button"))
         btn_add_scene.setFixedHeight(36)
         btn_add_scene.clicked.connect(self._add_scene)
         btn_rename_scene = QPushButton()
         btn_rename_scene.setFixedSize(36, 36)
         btn_rename_scene.setObjectName("btn_secondary")
         btn_rename_scene.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogDetailedView))
-        btn_rename_scene.setToolTip("Переименовать сцену")
+        btn_rename_scene.setToolTip(tr("scene.rename_tooltip"))
         btn_rename_scene.clicked.connect(self._rename_scene)
         btn_del_scene = QPushButton()
         btn_del_scene.setFixedSize(36, 36)
         btn_del_scene.setObjectName("btn_danger")
         btn_del_scene.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DialogDiscardButton))
-        btn_del_scene.setToolTip("Удалить сцену")
+        btn_del_scene.setToolTip(tr("scene.delete_tooltip"))
         btn_del_scene.clicked.connect(self._del_scene)
         sc_btn_row.addWidget(btn_add_scene, 1)
         sc_btn_row.addWidget(btn_rename_scene)
@@ -260,14 +292,12 @@ class SceneListPanel(QWidget):
         )
         bb_layout = QHBoxLayout(self._branch_bar)
         bb_layout.setContentsMargins(6, 4, 6, 4)
-        self._branch_label = QLabel("Ветка меню")
+        self._branch_label = QLabel(tr("mw.branch_label"))
         self._branch_label.setWordWrap(True)
-        self._branch_label.setStyleSheet("color:#6fd68f; font-size:11px; font-weight:bold;")
-        btn_branch_back = QPushButton("← Назад к сцене")
-        btn_branch_back.setStyleSheet(
-            "QPushButton { background:#1e1e1e; color:#ddd; border-radius:4px; padding:4px 8px; }"
-            "QPushButton:hover { background:#333; }"
-        )
+        self._branch_label.setObjectName("success_hint")
+        self._branch_label.setStyleSheet("font-size:11px; font-weight:bold;")
+        btn_branch_back = QPushButton(tr("mw.back_to_scene"))
+        btn_branch_back.setObjectName("btn_secondary")
         btn_branch_back.clicked.connect(self.branch_back_requested.emit)
         bb_layout.addWidget(self._branch_label, 1)
         bb_layout.addWidget(btn_branch_back)
@@ -275,19 +305,26 @@ class SceneListPanel(QWidget):
         layout.addWidget(self._branch_bar)
 
                              
-        nodes_group = QGroupBox("Элементы сцены")
+        nodes_group = QGroupBox(tr("mw.scene_elements_group"))
         ng_layout = QVBoxLayout(nodes_group)
         ng_layout.setContentsMargins(4, 4, 4, 4)
 
         search_row = QHBoxLayout()
         self.node_search = QLineEdit()
-        self.node_search.setPlaceholderText("🔎 Поиск по репликам / спрайтам / персонажам...")
+        self.node_search.setPlaceholderText(tr("mw.node_search_placeholder"))
         self.node_search.textChanged.connect(self._on_search_text)
         self.node_search.returnPressed.connect(self._search_next)
         search_row.addWidget(self.node_search, 1)
         self.search_status_lbl = QLabel("")
         self.search_status_lbl.setObjectName("search_status_lbl")
         search_row.addWidget(self.search_status_lbl)
+
+        # self.btn_toggle_graph_mode = QToolButton()
+        # self.btn_toggle_graph_mode.setText("🕸 " + tr("node_graph.graph_mode"))
+        # self.btn_toggle_graph_mode.setToolTip(tr("node_graph.mode_toggle_tooltip"))
+        # self.btn_toggle_graph_mode.setObjectName("btn_secondary")
+        # self.btn_toggle_graph_mode.clicked.connect(self._on_toggle_graph_mode)
+        # search_row.addWidget(self.btn_toggle_graph_mode)
         ng_layout.addLayout(search_row)
 
         self.node_list = QListWidget()
@@ -296,7 +333,13 @@ class SceneListPanel(QWidget):
         self.node_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.node_list.customContextMenuRequested.connect(self._show_node_context_menu)
         self.node_list.itemDoubleClicked.connect(self._on_node_item_double_clicked)
-        ng_layout.addWidget(self.node_list)
+
+        self.graph_canvas = None
+        self._graph_window: Optional[GraphWindow] = None
+
+        self.node_stack = QStackedWidget()
+        self.node_stack.addWidget(self.node_list)
+        ng_layout.addWidget(self.node_stack)
 
         sc_copy = QShortcut(QKeySequence.StandardKey.Copy, self.node_list,
                             activated=lambda: self._copy_nodes(self._selected_node_rows() or
@@ -311,7 +354,7 @@ class SceneListPanel(QWidget):
         self._search_pos = -1
 
         nd_btn_row = QHBoxLayout()
-        btn_add_node = QPushButton("Добавить")
+        btn_add_node = QPushButton(tr("mw.add_button"))
         btn_add_node.setFixedHeight(36)
         btn_add_node.clicked.connect(self._add_node)
 
@@ -319,28 +362,28 @@ class SceneListPanel(QWidget):
         btn_dup.setFixedSize(36, 36)
         btn_dup.setObjectName("btn_secondary")
         btn_dup.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogDetailedView))
-        btn_dup.setToolTip("Дублировать")
+        btn_dup.setToolTip(tr("node.duplicate_tooltip"))
         btn_dup.clicked.connect(self._dup_node)
 
         btn_up = QPushButton()
         btn_up.setFixedSize(36, 36)
         btn_up.setObjectName("btn_secondary")
         btn_up.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_ArrowUp))
-        btn_up.setToolTip("Переместить вверх")
+        btn_up.setToolTip(tr("node.move_up_tooltip"))
         btn_up.clicked.connect(self._move_up)
 
         btn_down = QPushButton()
         btn_down.setFixedSize(36, 36)
         btn_down.setObjectName("btn_secondary")
         btn_down.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_ArrowDown))
-        btn_down.setToolTip("Переместить вниз")
+        btn_down.setToolTip(tr("node.move_down_tooltip"))
         btn_down.clicked.connect(self._move_down)
 
         btn_del_node = QPushButton()
         btn_del_node.setFixedSize(36, 36)
         btn_del_node.setObjectName("btn_danger")
         btn_del_node.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DialogDiscardButton))
-        btn_del_node.setToolTip("Удалить")
+        btn_del_node.setToolTip(tr("node.delete_tooltip"))
         btn_del_node.clicked.connect(self._del_node)
 
         nd_btn_row.addWidget(btn_add_node, 1)
@@ -382,7 +425,7 @@ class SceneListPanel(QWidget):
         item.setText(f"  {i+1:02d}  {prefix}{node.preview_text()}")
         grp = self._group_for_node_id(node.node_id)
         item.setIcon(_row_swatch_icon(node.color_tag, grp.color if grp else None))
-        tooltip = _NODE_TYPE_HINTS.get(node.node_type, "") + "\n\n" + node.preview_text()
+        tooltip = _node_type_hints().get(node.node_type, "") + "\n\n" + node.preview_text()
         if node.import_warning:
             tooltip += f"\n\n⚠ {node.import_warning}"
             item.setForeground(QColor("#ffb84d"))
@@ -433,11 +476,133 @@ class SceneListPanel(QWidget):
                 self.node_list.setCurrentRow(self._node_to_row.get(target_idx, 0))
         self.node_list.blockSignals(False)
         self._apply_search_highlight()
+        if getattr(self, "graph_canvas", None) is not None:
+            self.graph_canvas.set_scene(scene, self._current_node_index())
+
+    def _on_toggle_graph_mode(self):
+        """Кнопка 'Граф' открывает canvas в отдельном окне, максимизированном
+        (showMaximized), а НЕ через настоящий OS fullscreen. Canvas и окно
+        создаются ЗАНОВО при каждом открытии (а не переиспользуют старый
+        виджет) - переиспользование одного и того же canvas между разными
+        жизненными циклами GraphWindow оказалось причиной 'съезжающего'
+        интерфейса при повторном открытии. Все позиции нод и т.п. живут в
+        модели (SceneNode.pos_x/pos_y), так что свежий виджет ничего не
+        теряет."""
+        if self._graph_window is not None:
+            return
+        self.graph_canvas = NodeGraphCanvas(self)
+        self.graph_canvas.node_clicked.connect(self._on_graph_node_clicked)
+        self.graph_canvas.node_double_clicked.connect(self._on_graph_node_double_clicked)
+        self.graph_canvas.set_scene(self._get_current_scene(), self._current_node_index())
+        self._graph_window = GraphWindow(self.graph_canvas)
+        self._graph_window.closed.connect(self._on_graph_window_closed)
+        self._graph_window.show()
+        self._graph_window.showMaximized()
+
+    def _on_graph_window_closed(self):
+        """Окно уже отвязало canvas от себя в closeEvent - здесь просто
+        полностью его уничтожаем (не держим для переиспользования)."""
+        if self._graph_window is not None:
+            if self.graph_canvas is not None:
+                self.graph_canvas.deleteLater()
+                self.graph_canvas = None
+            self._graph_window.deleteLater()
+            self._graph_window = None
+
+    def set_node_jump_target(self, row: int, target_label: str, choice_idx: Optional[int] = None):
+        """Устанавливает цель jump/menu-ветки, перетащенную мышью на LABEL
+        в графовом режиме (магнитное соединение стрелкой).
+
+        ВАЖНО: как и update_node_fields, намеренно НЕ вызывает полный
+        _rebuild_nodes() - тот пересоздаёт ВСЕ NodeBoxItem на canvas, а
+        _finish_connecting() в node_graph_view.py сразу после этого вызова
+        ещё обращается к старому (уже уничтоженному) объекту box - что и
+        приводило к поломке/крашу при соединении, особенно заметно на
+        второй и последующих ветках MENU."""
+        scene = self._get_current_scene()
+        if not scene or not (0 <= row < len(scene.nodes)):
+            return
+        node = scene.nodes[row]
+        self.before_change.emit(tr("mw.undo.connection_removed") if not target_label
+                                 else tr("mw.undo.node_edited", preview=node.preview_text()[:60]))
+        if node.node_type == NodeType.JUMP:
+            node.jump_target = target_label
+        elif node.node_type == NodeType.MENU and choice_idx is not None:
+            choices = node.menu_choices
+            if not choices:
+                choices.append(("", "", False, "", []))
+            if 0 <= choice_idx < len(choices):
+                ch = choices[choice_idx]
+                if isinstance(ch, dict):
+                    ch["jump"] = target_label
+                else:
+                    ch = list(ch)
+                    while len(ch) < 2:
+                        ch.append("")
+                    ch[1] = target_label
+                    choices[choice_idx] = tuple(ch)
+        list_row = self._node_to_row.get(row)
+        if list_row is not None:
+            item = self.node_list.item(list_row)
+            if item is not None:
+                self._style_item(item, node, row, scene)
+        if getattr(self, "graph_canvas", None) is not None:
+            self.graph_canvas.refresh_node_box(row)
+        self.node_order_changed.emit()
+        self.node_order_changed.emit()
+
+    def update_node_fields(self, row: int, **fields):
+        """Точечное изменение полей ноды из отдельной формы редактирования
+        графового режима (GraphNodeEditor) - не трогает основной NodeEditor.
+
+        ВАЖНО: намеренно НЕ вызывает полный _rebuild_nodes()/set_scene() -
+        это реентрантно дёргало graph_canvas.node_editor.set_node() на ТУ ЖЕ
+        строку, которая только что редактировалась (форма пересобиралась
+        прямо во время ввода, сбрасывая фокус/курсор - выглядело как
+        'состояние не сохраняется'). Вместо этого - точечное обновление
+        текста в списке и одной карточки в графе."""
+        scene = self._get_current_scene()
+        if not scene or not (0 <= row < len(scene.nodes)) or not fields:
+            return
+        node = scene.nodes[row]
+        self.before_change.emit(tr("mw.undo.node_edited", preview=node.preview_text()[:60]))
+        for k, v in fields.items():
+            if hasattr(node, k):
+                setattr(node, k, v)
+        list_row = self._node_to_row.get(row)
+        if list_row is not None:
+            item = self.node_list.item(list_row)
+            if item is not None:
+                self._style_item(item, node, row, scene)
+        if getattr(self, "graph_canvas", None) is not None:
+            self.graph_canvas.refresh_node_box(row)
+        self.node_order_changed.emit()
+
+    def _on_graph_node_clicked(self, node_idx: int):
+        """Клик по ноде в графовом режиме - синхронизируем обычный список,
+        чтобы остальная часть приложения (редактор ноды справа и т.п.)
+        обновилась через существующий сигнал node_selected."""
+        row = self._node_to_row.get(node_idx)
+        if row is not None:
+            self.node_list.setCurrentRow(row)
+        else:
+            self.node_selected.emit(self._effective_scene_idx(), node_idx)
+
+    def _on_graph_node_double_clicked(self, node_idx: int):
+        """Двойной клик по ноде в графовом режиме - выбираем её и поднимаем
+        главное окно на передний план, чтобы отредактировать поля в обычном
+        редакторе (сам редактор физически живёт только в главном окне -
+        никуда не репарентится, чтобы не повторить прошлый краш)."""
+        self._on_graph_node_clicked(node_idx)
+        win = self.window()
+        win.showNormal()
+        win.raise_()
+        win.activateWindow()
 
     def _group_header_text(self, grp, count: int) -> str:
-        suffix = "   (свёрнуто)" if grp.collapsed else ""
-        word = "нода" if count == 1 else ("ноды" if 2 <= count <= 4 else "нод")
-        return f"{grp.title}   ·   {count} {word}{suffix}"
+        suffix = tr("mw.group_collapsed_suffix") if grp.collapsed else ""
+        word = plural(count, {"ru": ("нода", "ноды", "нод"), "en": ("node", "nodes")})
+        return tr("mw.group_header", title=grp.title, count=count, word=word, suffix=suffix)
 
     def _apply_group_collapse_visibility(self, scene):
         for g in scene.groups:
@@ -512,9 +677,9 @@ class SceneListPanel(QWidget):
     def _add_scene(self):
         if not self.project:
             return
-        name, ok = QInputDialog.getText(self, "Новая сцена", "Название:")
+        name, ok = QInputDialog.getText(self, tr("mw.new_scene_title"), tr("mw.name_label"))
         if ok and name.strip():
-            self.before_change.emit(f"Добавлена сцена «{name.strip()}»")
+            self.before_change.emit(tr("mw.undo.scene_added", name=name.strip()))
             self.project.scenes.append(Scene(name=name.strip()))
             self._rebuild_scenes()
             self.scene_list.setCurrentRow(len(self.project.scenes) - 1)
@@ -524,9 +689,9 @@ class SceneListPanel(QWidget):
         scene = self._get_current_scene()
         if not scene:
             return
-        name, ok = QInputDialog.getText(self, "Переименовать", "Новое название:", text=scene.name)
+        name, ok = QInputDialog.getText(self, tr("mw.rename_title"), tr("mw.new_name_label"), text=scene.name)
         if ok and name.strip():
-            self.before_change.emit(f"Сцена «{scene.name}» переименована в «{name.strip()}»")
+            self.before_change.emit(tr("mw.undo.scene_renamed", old=scene.name, new=name.strip()))
             scene.name = name.strip()
             self._rebuild_scenes()
 
@@ -537,12 +702,12 @@ class SceneListPanel(QWidget):
         if idx < 0:
             return
         if len(self.project.scenes) <= 1:
-            QMessageBox.warning(self, "Нельзя", "Должна быть хотя бы одна сцена")
+            QMessageBox.warning(self, tr("mw.cannot_title"), tr("mw.need_one_scene"))
             return
-        reply = QMessageBox.question(self, "Удалить сцену",
-                                     f"Удалить сцену «{self.project.scenes[idx].name}»?")
+        reply = QMessageBox.question(self, tr("mw.delete_scene_title"),
+                                     tr("mw.delete_scene_confirm", name=self.project.scenes[idx].name))
         if reply == QMessageBox.StandardButton.Yes:
-            self.before_change.emit(f"Удалена сцена «{self.project.scenes[idx].name}»")
+            self.before_change.emit(tr("mw.undo.scene_deleted", name=self.project.scenes[idx].name))
             self.project.scenes.pop(idx)
             self._current_scene = max(0, idx - 1)
             self._rebuild_scenes()
@@ -550,13 +715,13 @@ class SceneListPanel(QWidget):
 
                            
 
-    def add_node_of_type(self, node_type: NodeType, label: str = "Добавлена нода"):
+    def add_node_of_type(self, node_type: NodeType, label: str = None):
         scene = self._get_current_scene()
         if not scene:
             return
         node = SceneNode(node_type=node_type)
         idx = self._current_node_index()
-        self.before_change.emit(label)
+        self.before_change.emit(label if label is not None else tr("mw.undo.node_added"))
         if idx < 0:
             scene.nodes.append(node)
             new_idx = len(scene.nodes) - 1
@@ -567,7 +732,7 @@ class SceneListPanel(QWidget):
         self._select_node_row(new_idx)
 
     def _add_node(self):
-        self.add_node_of_type(NodeType.DIALOGUE, "Добавлена нода: 💬 Реплика")
+        self.add_node_of_type(NodeType.DIALOGUE, tr("mw.undo.node_added_dialogue"))
 
     def _dup_node(self):
         scene = self._get_current_scene()
@@ -576,7 +741,7 @@ class SceneListPanel(QWidget):
         idx = self._current_node_index()
         if 0 <= idx < len(scene.nodes):
             import copy, uuid
-            self.before_change.emit(f"Дублирована нода: {scene.nodes[idx].preview_text()[:60]}")
+            self.before_change.emit(tr("mw.undo.node_duplicated", preview=scene.nodes[idx].preview_text()[:60]))
             dup = copy.deepcopy(scene.nodes[idx])
             dup.node_id = str(uuid.uuid4())[:8]
             scene.nodes.insert(idx + 1, dup)
@@ -589,7 +754,7 @@ class SceneListPanel(QWidget):
             return
         idx = self._current_node_index()
         if idx > 0:
-            self.before_change.emit(f"Нода перемещена вверх: {scene.nodes[idx].preview_text()[:60]}")
+            self.before_change.emit(tr("mw.undo.node_moved_up", preview=scene.nodes[idx].preview_text()[:60]))
             scene.nodes[idx], scene.nodes[idx-1] = scene.nodes[idx-1], scene.nodes[idx]
             self._rebuild_nodes()
             self._select_node_row(idx - 1)
@@ -601,11 +766,31 @@ class SceneListPanel(QWidget):
             return
         idx = self._current_node_index()
         if 0 <= idx < len(scene.nodes) - 1:
-            self.before_change.emit(f"Нода перемещена вниз: {scene.nodes[idx].preview_text()[:60]}")
+            self.before_change.emit(tr("mw.undo.node_moved_down", preview=scene.nodes[idx].preview_text()[:60]))
             scene.nodes[idx], scene.nodes[idx+1] = scene.nodes[idx+1], scene.nodes[idx]
             self._rebuild_nodes()
             self._select_node_row(idx + 1)
             self.node_order_changed.emit()
+
+    def delete_nodes(self, rows: list):
+        """Удаляет несколько нод разом (используется Del в графовом режиме).
+        Тот же принцип очистки групп, что и в одиночном _del_node."""
+        scene = self._get_current_scene()
+        if not scene or not rows:
+            return
+        rows = sorted(set(r for r in rows if 0 <= r < len(scene.nodes)), reverse=True)
+        if not rows:
+            return
+        self.before_change.emit(tr("mw.undo.nodes_deleted", count=len(rows)))
+        deleted_ids = set()
+        for r in rows:
+            deleted_ids.add(scene.nodes[r].node_id)
+            scene.nodes.pop(r)
+        for g in scene.groups:
+            g.node_ids = [nid for nid in g.node_ids if nid not in deleted_ids]
+        scene.groups = [g for g in scene.groups if g.node_ids]
+        self._rebuild_nodes()
+        self.notify_current_selection()
 
     def _del_node(self):
         scene = self._get_current_scene()
@@ -613,7 +798,7 @@ class SceneListPanel(QWidget):
             return
         idx = self._current_node_index()
         if 0 <= idx < len(scene.nodes):
-            self.before_change.emit(f"Удалена нода: {scene.nodes[idx].preview_text()[:60]}")
+            self.before_change.emit(tr("mw.undo.node_deleted", preview=scene.nodes[idx].preview_text()[:60]))
             deleted_id = scene.nodes[idx].node_id
             scene.nodes.pop(idx)
             for g in scene.groups:
@@ -629,7 +814,7 @@ class SceneListPanel(QWidget):
         scene = self._get_current_scene()
         if not scene:
             return
-        self.before_change.emit(f"Изменён цвет {len(rows)} нод(ы)")
+        self.before_change.emit(tr("mw.undo.nodes_recolored", count=len(rows)))
         for r in rows:
             if 0 <= r < len(scene.nodes):
                 scene.nodes[r].color_tag = color
@@ -648,7 +833,7 @@ class SceneListPanel(QWidget):
                 break
             end = i
         import copy, uuid
-        self.before_change.emit(f"Дублирована ветка ({end - row + 1} нод, начиная с «{scene.nodes[row].preview_text()[:40]}»)")
+        self.before_change.emit(tr("mw.undo.branch_duplicated", count=end - row + 1, preview=scene.nodes[row].preview_text()[:40]))
         chunk = [copy.deepcopy(n) for n in scene.nodes[row:end + 1]]
         for n in chunk:
             n.node_id = str(uuid.uuid4())[:8]
@@ -663,7 +848,7 @@ class SceneListPanel(QWidget):
             return
         from core.project_manager import node_from_dict
         import uuid
-        self.before_change.emit(f"Вставлено нод: {len(clip_data)}")
+        self.before_change.emit(tr("mw.undo.nodes_pasted", count=len(clip_data)))
         insert_at = row + 1 if row >= 0 else len(scene.nodes)
         for offset, d in enumerate(clip_data):
             node = node_from_dict(d, new_id=True)
@@ -679,7 +864,7 @@ class SceneListPanel(QWidget):
         if not node_ids:
             return
         from core.models import NodeGroup
-        self.before_change.emit(f"Создана группа «{title}» ({len(node_ids)} нод)")
+        self.before_change.emit(tr("mw.undo.group_created", title=title, count=len(node_ids)))
         scene.groups.append(NodeGroup(title=title, node_ids=node_ids))
         self._rebuild_nodes()
 
@@ -688,7 +873,7 @@ class SceneListPanel(QWidget):
         if not scene:
             return
         old_title = next((g.title for g in scene.groups if g.group_id == group_id), "")
-        self.before_change.emit(f"Разгруппировано: «{old_title}»")
+        self.before_change.emit(tr("mw.undo.ungrouped", title=old_title))
         scene.groups = [g for g in scene.groups if g.group_id != group_id]
         self._rebuild_nodes()
 
@@ -699,7 +884,10 @@ class SceneListPanel(QWidget):
         grp = next((g for g in scene.groups if g.group_id == group_id), None)
         if not grp:
             return
-        self.before_change.emit(f"{'Свёрнута' if not grp.collapsed else 'Развёрнута'} группа «{grp.title}»")
+        self.before_change.emit(
+            tr("mw.undo.group_collapsed", title=grp.title) if not grp.collapsed
+            else tr("mw.undo.group_expanded", title=grp.title)
+        )
         grp.collapsed = not grp.collapsed
         self._rebuild_nodes()
 
@@ -710,7 +898,7 @@ class SceneListPanel(QWidget):
         grp = next((g for g in scene.groups if g.group_id == group_id), None)
         if not grp:
             return
-        self.before_change.emit(f"Группа «{grp.title}» переименована в «{title}»")
+        self.before_change.emit(tr("mw.undo.group_renamed", old=grp.title, new=title))
         grp.title = title
         self._rebuild_nodes()
 
@@ -721,7 +909,7 @@ class SceneListPanel(QWidget):
         grp = next((g for g in scene.groups if g.group_id == group_id), None)
         if not grp:
             return
-        self.before_change.emit(f"Изменён цвет группы «{grp.title}»")
+        self.before_change.emit(tr("mw.undo.group_recolored", title=grp.title))
         grp.color = color
         self._rebuild_nodes()
 
@@ -753,16 +941,16 @@ class SceneListPanel(QWidget):
         if header_gid is not None:
             grp = next((g for g in scene.groups if g.group_id == header_gid), None)
             if grp:
-                act_toggle = menu.addAction("Свернуть/развернуть группу")
+                act_toggle = menu.addAction(tr("mw.ctx.toggle_group"))
                 act_toggle.triggered.connect(lambda: self.toggle_group_collapsed(grp.group_id))
-                act_rn = menu.addAction("Переименовать группу...")
+                act_rn = menu.addAction(tr("mw.ctx.rename_group"))
                 act_rn.triggered.connect(lambda: self._rename_group_dialog(grp.group_id))
-                act_col = menu.addMenu("Цвет группы")
+                act_col = menu.addMenu(tr("node.group_color_menu"))
                 for c in DEFAULT_TAG_COLORS:
                     a = act_col.addAction("")
                     a.setIcon(_color_icon(c))
                     a.triggered.connect(lambda checked=False, col=c: self.recolor_group(grp.group_id, col))
-                act_ungroup = menu.addAction("Разгруппировать")
+                act_ungroup = menu.addAction(tr("mw.ctx.ungroup"))
                 act_ungroup.triggered.connect(lambda: self.ungroup(grp.group_id))
             menu.exec(self.node_list.mapToGlobal(pos))
             return
@@ -774,38 +962,38 @@ class SceneListPanel(QWidget):
             if target_row is not None:
                 self.node_list.setCurrentRow(target_row)
 
-        act_color = menu.addMenu("Цвет метки ноды")
+        act_color = menu.addMenu(tr("node.label_color_menu"))
         for c in DEFAULT_TAG_COLORS:
             a = act_color.addAction("")
             a.setIcon(_color_icon(c))
             a.triggered.connect(lambda checked=False, col=c, rows=rows: self.set_nodes_color(rows, col))
         act_color.addSeparator()
-        act_clear_color = act_color.addAction("Без метки")
+        act_clear_color = act_color.addAction(tr("mw.ctx.no_label"))
         act_clear_color.triggered.connect(lambda checked=False, rows=rows: self.set_nodes_color(rows, None))
 
         menu.addSeparator()
-        act_copy = menu.addAction("Копировать (Ctrl+C)")
+        act_copy = menu.addAction(tr("mw.ctx.copy"))
         act_copy.setEnabled(bool(rows))
         act_copy.triggered.connect(lambda: self._copy_nodes(rows))
-        act_paste = menu.addAction("Вставить после (Ctrl+V)")
+        act_paste = menu.addAction(tr("mw.ctx.paste_after"))
         act_paste.setEnabled(self._has_clipboard_nodes())
         paste_after_idx = clicked_idx if clicked_idx >= 0 else self._current_node_index()
         act_paste.triggered.connect(lambda: self._paste_clipboard_after(paste_after_idx))
 
         if clicked_idx >= 0:
-            act_dup_branch = menu.addAction("Дублировать блок диалога (до label/return/конца)")
+            act_dup_branch = menu.addAction(tr("mw.ctx.dup_branch"))
             act_dup_branch.triggered.connect(lambda: self.duplicate_branch(clicked_idx))
 
             if not self.is_in_branch_mode():
                 menu.addSeparator()
-                act_present_from = menu.addAction("▶ Запустить прогон отсюда")
+                act_present_from = menu.addAction(tr("mw.ctx.present_from_here"))
                 act_present_from.triggered.connect(
                     lambda: self.present_from_here_requested.emit(self.scene_list.currentRow(), clicked_idx)
                 )
 
         if len(rows) >= 2:
             menu.addSeparator()
-            act_group = menu.addAction(f"Сгруппировать выбранные ноды ({len(rows)})")
+            act_group = menu.addAction(tr("mw.ctx.group_selected", count=len(rows)))
             act_group.triggered.connect(lambda: self._make_group_dialog(rows))
 
         menu.exec(self.node_list.mapToGlobal(pos))
@@ -815,16 +1003,16 @@ class SceneListPanel(QWidget):
         grp = next((g for g in (scene.groups if scene else []) if g.group_id == group_id), None)
         if not grp:
             return
-        title, ok = QInputDialog.getText(self, "Название группы", "Название:", text=grp.title)
+        title, ok = QInputDialog.getText(self, tr("mw.group_title_dialog"), tr("mw.name_label"), text=grp.title)
         if ok and title.strip():
             self.rename_group(group_id, title.strip())
 
     def _make_group_dialog(self, rows: list):
         if rows != list(range(rows[0], rows[-1] + 1)):
-            QMessageBox.warning(self, "Нельзя сгруппировать",
-                                 "Можно сгруппировать только идущие подряд ноды.")
+            QMessageBox.warning(self, tr("mw.cannot_group_title"),
+                                 tr("mw.cannot_group_text"))
             return
-        title, ok = QInputDialog.getText(self, "Новая группа", "Название группы (акт/глава):", text="Акт")
+        title, ok = QInputDialog.getText(self, tr("mw.new_group_title"), tr("mw.new_group_name_label"), text=tr("mw.new_group_default"))
         if ok and title.strip():
             self.create_group(rows, title.strip())
 
@@ -933,12 +1121,13 @@ class ScenePreviewPanel(QWidget):
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(6)
 
-        title = QLabel("Предпросмотр сцены")
-        title.setStyleSheet("color:#ff8c3d; font-size:13px; font-weight:600; padding:4px;")
+        title = QLabel(tr("mw.preview_title"))
+        title.setObjectName("accent_caption")
+        title.setStyleSheet("font-size:13px; padding:4px;")
         layout.addWidget(title)
 
         zoom_row = QHBoxLayout()
-        zoom_row.addWidget(QLabel("Масштаб:"))
+        zoom_row.addWidget(QLabel(tr("mw.zoom_label")))
         self.zoom_slider = QSlider(Qt.Orientation.Horizontal)
         self.zoom_slider.setRange(50, 150)
         self.zoom_slider.setValue(100)
@@ -947,7 +1136,7 @@ class ScenePreviewPanel(QWidget):
         zoom_row.addWidget(self.zoom_slider)
         self.zoom_lbl = QLabel("100%")
         self.zoom_lbl.setFixedWidth(40)
-        self.zoom_lbl.setStyleSheet("color:#a8a8b3; font-size:11px;")
+        self.zoom_lbl.setObjectName("hint_text_bright")
         zoom_row.addWidget(self.zoom_lbl)
         zoom_row.addStretch()
         layout.addLayout(zoom_row)
@@ -969,14 +1158,16 @@ class ScenePreviewPanel(QWidget):
         pw_layout.addWidget(preview_scroll)
         layout.addWidget(preview_wrap, 0, Qt.AlignmentFlag.AlignTop)
 
-        self.hint_lbl = QLabel("Спрайт можно тащить мышью, чтобы сдвинуть, или кликнуть по нему (без перетаскивания), чтобы убрать со сцены.")
+        self.hint_lbl = QLabel(tr("mw.sprite_drag_hint"))
         self.hint_lbl.setWordWrap(True)
-        self.hint_lbl.setStyleSheet("color:#75757f; font-size:10px; padding:2px 4px;")
+        self.hint_lbl.setObjectName("hint_text")
+        self.hint_lbl.setStyleSheet("font-size:10px; padding:2px 4px;")
         layout.addWidget(self.hint_lbl)
 
         self.step_lbl = QLabel("")
         self.step_lbl.setWordWrap(True)
-        self.step_lbl.setStyleSheet("color:#a8a8b3; font-size:11px; padding:4px;")
+        self.step_lbl.setObjectName("hint_text_bright")
+        self.step_lbl.setStyleSheet("padding:4px;")
         layout.addWidget(self.step_lbl)
 
         layout.addStretch()
@@ -992,6 +1183,7 @@ class ScenePreviewPanel(QWidget):
     def set_context(self, rm: ResourceManager, project: Project):
         self.rm = rm
         self.project = project
+        self.preview.set_mask_resolver(lambda rel: _resolve_mask_path(rm, rel))
 
     def _on_zoom_changed(self, value: int):
         self.zoom_lbl.setText(f"{value}%")
@@ -1014,6 +1206,8 @@ class ScenePreviewPanel(QWidget):
         """Отображает визуальное состояние сцены на момент узла node_index"""
         if project is not None:
             self.project = project
+        prev_scene = self._current_scene
+        prev_index = self._current_node_index
         self._current_scene = scene
         self._current_node_index = node_index
         if not scene or node_index < 0 or node_index >= len(scene.nodes):
@@ -1023,15 +1217,28 @@ class ScenePreviewPanel(QWidget):
             self.preview.set_nvl_mode(False)
             self.preview.set_nvl_history([])
             self._current_node = None
-            self.step_lbl.setText("Нет выбранного шага сцены.")
+            self.step_lbl.setText(tr("mw.no_step_selected"))
             return
+
+                                                                              
+                                                                            
+                                                                       
+        trigger_spec = None
+        if (prev_scene is scene and prev_index is not None and prev_index >= 0
+                and node_index == prev_index + 1):
+            entering_node = scene.nodes[node_index]
+            trans_text = getattr(entering_node, 'transition', '') or ''
+            if trans_text and entering_node.node_type in _VISUAL_TRANSITION_NODE_TYPES:
+                trigger_spec = transitions.parse_transition(
+                    resolve_custom_transition(trans_text, getattr(self.rm, 'base_dir', None)))
+        old_snapshot = self.preview.snapshot_current() if trigger_spec is not None else None
 
         state = compute_state_up_to(scene, node_index, rm=self.rm)
         self._current_node = scene.nodes[node_index]
 
                                                  
         bg_path = self._resolve_path(state.cg_var) or self._resolve_path(state.bg_var)
-        self.preview.set_background(bg_path)
+        self.preview.set_background(bg_path, atl_script=state.bg_atl_script)
 
         layers = []
         for sprite in state.sprite_list():
@@ -1047,12 +1254,22 @@ class ScenePreviewPanel(QWidget):
                 if path:
                     pm = get_pixmap(path)
             if pm is not None:
+                image_variants = {}
+                if sprite.atl_script:
+                    for img_name in atl_engine.referenced_images(sprite.atl_script):
+                        vpath = self._resolve_path(img_name)
+                        if vpath:
+                            vp = get_pixmap(vpath)
+                            if vp is not None:
+                                image_variants[img_name] = vp
                 layers.append(SpriteLayer(
                     pixmap=pm,
                     xalign=sprite.position.xalign,
                     yalign=sprite.position.yalign,
                     zoom=sprite.position.zoom,
                     tag=sprite.tag,
+                    atl_script=sprite.atl_script,
+                    image_variants=image_variants,
                 ))
         self.preview.set_sprites(layers)
 
@@ -1077,7 +1294,10 @@ class ScenePreviewPanel(QWidget):
                 nvl_history = []
         self.preview.set_nvl_history(nvl_history)
 
-        self.step_lbl.setText(f"Шаг {node_index + 1} из {len(scene.nodes)}: {scene.nodes[node_index].preview_text()}")
+        self.step_lbl.setText(tr("mw.step_of", n=node_index + 1, total=len(scene.nodes), preview=scene.nodes[node_index].preview_text()))
+
+        if trigger_spec is not None:
+            self.preview.start_transition(old_snapshot, trigger_spec)
 
     def _on_sprite_dragged(self, xalign: float):
                                                                              
@@ -1121,9 +1341,26 @@ class ScenePreviewPanel(QWidget):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("RenPy Visual Script Editor")
-        self.setMinimumSize(1600, 860)
-        self.resize(1760, 940)
+        self.setWindowTitle(tr("main_window.title"))
+                                                                              
+                                                                              
+                                                                          
+                                                                             
+                                                                            
+                                                                             
+                                                                            
+                                                                          
+        screen = QApplication.primaryScreen()
+        avail = screen.availableGeometry() if screen else None
+        min_w, min_h = 1600, 860
+        default_w, default_h = 1760, 940
+        if avail is not None:
+            min_w = min(min_w, max(900, int(avail.width() * 0.92)))
+            min_h = min(min_h, max(600, int(avail.height() * 0.88)))
+            default_w = min(default_w, avail.width())
+            default_h = min(default_h, avail.height())
+        self.setMinimumSize(min_w, min_h)
+        self.resize(default_w, default_h)
 
         self.pm = ProjectManager()
         self.rm = ResourceManager(BASE_DIR)
@@ -1185,13 +1422,13 @@ class MainWindow(QMainWindow):
         self._hotkey_shortcuts = []
 
         node_type_map = {
-            "add_dialogue": (NodeType.DIALOGUE, "Добавлена реплика"),
-            "add_narration": (NodeType.NARRATION, "Добавлено повествование"),
-            "add_show_sprite": (NodeType.SHOW_SPRITE, "Добавлен показ спрайта"),
-            "add_hide_sprite": (NodeType.HIDE_SPRITE, "Добавлено скрытие спрайта"),
-            "add_show_bg": (NodeType.SHOW_BG, "Добавлен показ фона"),
-            "add_pause": (NodeType.PAUSE, "Добавлена пауза"),
-            "add_menu": (NodeType.MENU, "Добавлено меню"),
+            "add_dialogue": (NodeType.DIALOGUE, tr("mw.hotkey.dialogue_added")),
+            "add_narration": (NodeType.NARRATION, tr("mw.hotkey.narration_added")),
+            "add_show_sprite": (NodeType.SHOW_SPRITE, tr("mw.hotkey.show_sprite_added")),
+            "add_hide_sprite": (NodeType.HIDE_SPRITE, tr("mw.hotkey.hide_sprite_added")),
+            "add_show_bg": (NodeType.SHOW_BG, tr("mw.hotkey.show_bg_added")),
+            "add_pause": (NodeType.PAUSE, tr("mw.hotkey.pause_added")),
+            "add_menu": (NodeType.MENU, tr("mw.hotkey.menu_added")),
         }
         simple_action_map = {
             "duplicate_node": self.scene_panel._dup_node,
@@ -1236,10 +1473,8 @@ class MainWindow(QMainWindow):
             clear_autosave(BASE_DIR)
             return
         reply = QMessageBox.question(
-            self, "Восстановление после сбоя",
-            f"Обнаружены несохранённые изменения из прошлой сессии "
-            f"(«{info.title}»), похоже, редактор закрылся аварийно.\n\n"
-            f"Восстановить их?",
+            self, tr("mw.crash_recovery_title"),
+            tr("mw.crash_recovery_text", title=info.title),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if reply == QMessageBox.StandardButton.Yes:
@@ -1248,9 +1483,9 @@ class MainWindow(QMainWindow):
                 self.pm.current_path = info.original_path
                 self._load_project_to_ui()
                 self._mark_dirty()
-                self.status_lbl.setText("Восстановлено из автосохранения - не забудьте сохранить (Ctrl+S)")
+                self.status_lbl.setText(tr("mw.restored_from_autosave"))
             except Exception as e:
-                QMessageBox.critical(self, "Ошибка восстановления", str(e))
+                QMessageBox.critical(self, tr("mw.restore_error_title"), str(e))
         clear_autosave(BASE_DIR)
 
     def _edit_editor_settings(self):
@@ -1270,13 +1505,7 @@ class MainWindow(QMainWindow):
             return
         self._restore_snapshot(snap)
         self._mark_dirty()
-        self.status_lbl.setText(f"Отменено действий: {depth}")
-
-                                                                          
-                                                                        
-                                                                     
-                                                                           
-                                             
+        self.status_lbl.setText(tr("mw.undo_count", depth=depth))                  
         self._geo_save_timer = QTimer(self)
         self._geo_save_timer.setSingleShot(True)
         self._geo_save_timer.timeout.connect(self._save_geometry_now)
@@ -1314,10 +1543,14 @@ class MainWindow(QMainWindow):
         self.scene_panel.scene_selected.connect(self._on_scene_selected)
         self.scene_panel.node_selected.connect(self._on_node_selected)
         self.scene_panel.node_order_changed.connect(self._on_node_changed)
-        self.scene_panel.before_change.connect(self._begin_change)
+        self.scene_panel.before_change.connect(self._on_scene_panel_before_change)
         self.scene_panel.branch_back_requested.connect(self._exit_menu_branch)
         self.scene_panel.present_from_here_requested.connect(self._start_presentation_from)
         splitter.addWidget(self.scene_panel)
+        self.scene_panel.rm = self.rm
+        self.scene_panel.tags_store = self.tags_store
+        self.scene_panel.usage_store = self.usage_store
+        self.scene_panel.get_characters = lambda: (self.project.characters if self.project else [])
 
                                
         self.node_editor = NodeEditor(self.rm)
@@ -1334,6 +1567,7 @@ class MainWindow(QMainWindow):
         scroll.setWidgetResizable(True)
         scroll.setMinimumWidth(440)
         splitter.addWidget(scroll)
+        self.scene_panel.main_splitter = splitter
 
                                             
         self.preview_panel = ScenePreviewPanel()
@@ -1355,213 +1589,213 @@ class MainWindow(QMainWindow):
         mb = self.menuBar()
 
               
-        file_menu = mb.addMenu("Файл")
+        file_menu = mb.addMenu(tr("menu.file"))
 
-        act_new = QAction("Новый проект", self)
+        act_new = QAction(tr("menu.file.new"), self)
         act_new.setShortcut(QKeySequence.StandardKey.New)
-        act_new.setIconText("Новый")
+        act_new.setIconText(tr("menu.file.new_short"))
         act_new.triggered.connect(self._new_project)
         file_menu.addAction(act_new)
         self.act_new = act_new
 
-        act_open = QAction("Открыть...", self)
+        act_open = QAction(tr("menu.file.open"), self)
         act_open.setShortcut(QKeySequence.StandardKey.Open)
-        act_open.setIconText("Открыть")
+        act_open.setIconText(tr("menu.file.open_short"))
         act_open.triggered.connect(self._open_project)
         file_menu.addAction(act_open)
         self.act_open = act_open
 
-        act_save = QAction("Сохранить", self)
+        act_save = QAction(tr("menu.file.save"), self)
         act_save.setShortcut(QKeySequence.StandardKey.Save)
         act_save.triggered.connect(self._save_project)
         file_menu.addAction(act_save)
         self.act_save = act_save
 
-        act_save_as = QAction("Сохранить как...", self)
+        act_save_as = QAction(tr("menu.file.save_as"), self)
         act_save_as.setShortcut(QKeySequence("Ctrl+Shift+S"))
         act_save_as.triggered.connect(self._save_project_as)
         file_menu.addAction(act_save_as)
 
         file_menu.addSeparator()
-        act_quit = QAction("Выход", self)
+        act_quit = QAction(tr("menu.file.quit"), self)
         act_quit.setShortcut(QKeySequence.StandardKey.Quit)
         act_quit.triggered.connect(self.close)
         file_menu.addAction(act_quit)
 
               
-        edit_menu = mb.addMenu("Правка")
+        edit_menu = mb.addMenu(tr("menu.edit"))
 
-        act_palette = QAction("Командная палитра...", self)
+        act_palette = QAction(tr("menu.edit.command_palette"), self)
         act_palette.setShortcut(QKeySequence("Ctrl+Shift+P"))
         act_palette.triggered.connect(self._show_command_palette)
         edit_menu.addAction(act_palette)
         edit_menu.addSeparator()
 
-        act_undo = QAction("Отменить", self)
+        act_undo = QAction(tr("menu.edit.undo"), self)
         act_undo.setShortcut(QKeySequence.StandardKey.Undo)
-        act_undo.setIconText("Отменить")
+        act_undo.setIconText(tr("menu.edit.undo"))
         act_undo.triggered.connect(self._undo)
         act_undo.setEnabled(False)
         edit_menu.addAction(act_undo)
         self.act_undo = act_undo
 
-        act_redo = QAction("Повторить", self)
+        act_redo = QAction(tr("menu.edit.redo"), self)
         act_redo.setShortcut(QKeySequence.StandardKey.Redo)
-        act_redo.setIconText("Повторить")
+        act_redo.setIconText(tr("menu.edit.redo"))
         act_redo.triggered.connect(self._redo)
         act_redo.setEnabled(False)
         edit_menu.addAction(act_redo)
         self.act_redo = act_redo
 
         edit_menu.addSeparator()
-        act_find_replace = QAction("Найти и заменить...", self)
+        act_find_replace = QAction(tr("menu.edit.find_replace"), self)
         act_find_replace.setShortcut(QKeySequence("Ctrl+H"))
         act_find_replace.triggered.connect(self._show_find_replace)
         edit_menu.addAction(act_find_replace)
 
         edit_menu.addSeparator()
-        act_history = QAction("История действий...", self)
+        act_history = QAction(tr("menu.edit.history"), self)
         act_history.setShortcut(QKeySequence("Ctrl+Alt+H"))
         act_history.triggered.connect(self._show_history_panel)
         edit_menu.addAction(act_history)
 
-        act_editor_settings = QAction("Настройки редактора (клавиши, автосохранение)...", self)
+        act_editor_settings = QAction(tr("menu.edit.editor_settings"), self)
         act_editor_settings.triggered.connect(self._edit_editor_settings)
         edit_menu.addAction(act_editor_settings)
 
                 
-        proj_menu = mb.addMenu("Проект")
+        proj_menu = mb.addMenu(tr("menu.project"))
 
-        act_chars = QAction("Персонажи...", self)
+        act_chars = QAction(tr("menu.project.characters"), self)
         act_chars.setShortcut(QKeySequence("Ctrl+P"))
-        act_chars.setIconText("Персонажи")
+        act_chars.setIconText(tr("menu.project.characters_short"))
         act_chars.triggered.connect(self._edit_characters)
         proj_menu.addAction(act_chars)
         self.act_chars = act_chars
 
-        act_res = QAction("Настройки ресурсов...", self)
+        act_res = QAction(tr("menu.project.resources"), self)
         act_res.triggered.connect(self._edit_resources)
         proj_menu.addAction(act_res)
 
-        act_tags = QAction("Категории тегов (фоны/CG)...", self)
+        act_tags = QAction(tr("menu.project.tags"), self)
         act_tags.triggered.connect(self._edit_tags)
         proj_menu.addAction(act_tags)
 
-        act_code_templates = QAction("Шаблоны пользовательских нод...", self)
+        act_code_templates = QAction(tr("menu.project.code_templates"), self)
         act_code_templates.triggered.connect(self._edit_code_templates)
         proj_menu.addAction(act_code_templates)
 
         proj_menu.addSeparator()
-        act_presentation = QAction("▶ Режим презентации", self)
+        act_presentation = QAction(tr("menu.project.presentation"), self)
         act_presentation.setShortcut(QKeySequence("Shift+F5"))
         act_presentation.triggered.connect(self._start_presentation)
         proj_menu.addAction(act_presentation)
 
-        act_timing = QAction("⏱ Проверка тайминга...", self)
+        act_timing = QAction(tr("menu.project.timing"), self)
         act_timing.triggered.connect(self._show_timing_report)
         proj_menu.addAction(act_timing)
 
-        act_spellcheck = QAction("🔤 Проверка реплик...", self)
+        act_spellcheck = QAction(tr("menu.project.spellcheck"), self)
         act_spellcheck.triggered.connect(self._show_spellcheck_report)
         proj_menu.addAction(act_spellcheck)
 
-        act_import_paths = QAction("Импорт путей из .rpy...", self)
+        act_import_paths = QAction(tr("menu.project.import_paths"), self)
         act_import_paths.triggered.connect(self._import_paths)
         proj_menu.addAction(act_import_paths)
 
-        act_import_script = QAction("Импорт скрипта из .rpy...", self)
+        act_import_script = QAction(tr("menu.project.import_script"), self)
         act_import_script.triggered.connect(self._import_script)
         proj_menu.addAction(act_import_script)
 
-        act_screenplay = QAction("Экспорт/импорт текста для вычитки...", self)
+        act_screenplay = QAction(tr("menu.project.screenplay"), self)
         act_screenplay.triggered.connect(self._show_screenplay_dialog)
         proj_menu.addAction(act_screenplay)
 
-        act_git = QAction("Версионирование проекта (Git)...", self)
+        act_git = QAction(tr("menu.project.git"), self)
         act_git.triggered.connect(self._show_git_panel)
         proj_menu.addAction(act_git)
 
-        act_download_res = QAction("Скачать ресурсы для модификаций...", self)
-        act_download_res.setIconText("Скачать ресурсы")
+        act_download_res = QAction(tr("menu.project.download_resources"), self)
+        act_download_res.setIconText(tr("menu.project.download_resources_short"))
         act_download_res.triggered.connect(self._show_resources_download)
         proj_menu.addAction(act_download_res)
         self.act_download_res = act_download_res
 
-        act_rescan = QAction("Переиндексировать ресурсы", self)
+        act_rescan = QAction(tr("menu.project.rescan"), self)
         act_rescan.setShortcut(QKeySequence("F5"))
-        act_rescan.setIconText("Переиндексировать")
+        act_rescan.setIconText(tr("menu.project.rescan_short"))
         act_rescan.triggered.connect(self._rescan_resources)
         proj_menu.addAction(act_rescan)
         self.act_rescan = act_rescan
 
         proj_menu.addSeparator()
-        act_rename = QAction("Переименовать проект...", self)
+        act_rename = QAction(tr("menu.project.rename"), self)
         act_rename.triggered.connect(self._rename_project)
         proj_menu.addAction(act_rename)
 
-        act_label = QAction("Главная метка (label)...", self)
+        act_label = QAction(tr("menu.project.main_label"), self)
         act_label.triggered.connect(self._set_main_label)
         proj_menu.addAction(act_label)
 
                    
-        gen_menu = mb.addMenu("Генерация")
+        gen_menu = mb.addMenu(tr("menu.generation"))
 
-        act_preview = QAction("Просмотр кода...", self)
+        act_preview = QAction(tr("menu.generation.preview"), self)
         act_preview.setShortcut(QKeySequence("Ctrl+G"))
-        act_preview.setIconText("Генерировать")
+        act_preview.setIconText(tr("menu.generation.preview_short"))
         act_preview.triggered.connect(self._show_code_preview)
         gen_menu.addAction(act_preview)
         self.act_preview = act_preview
 
-        act_export = QAction("Экспорт .rpy...", self)
+        act_export = QAction(tr("menu.generation.export"), self)
         act_export.setShortcut(QKeySequence("Ctrl+E"))
-        act_export.setIconText("Экспорт .rpy")
+        act_export.setIconText(tr("menu.generation.export_short"))
         act_export.triggered.connect(self._export_rpy)
         gen_menu.addAction(act_export)
         self.act_export = act_export
 
-        act_export_split = QAction("Экспорт в несколько файлов (по главам/актам)...", self)
+        act_export_split = QAction(tr("menu.generation.export_split"), self)
         act_export_split.triggered.connect(self._export_split)
         gen_menu.addAction(act_export_split)
 
-        act_defines = QAction("Экспорт блока defines...", self)
+        act_defines = QAction(tr("menu.generation.export_defines"), self)
         act_defines.triggered.connect(self._export_defines)
         gen_menu.addAction(act_defines)
 
         gen_menu.addSeparator()
-        act_res_defines = QAction("Экспорт defines ресурсов...", self)
+        act_res_defines = QAction(tr("menu.generation.export_resource_defines"), self)
         act_res_defines.triggered.connect(self._export_resource_defines)
         gen_menu.addAction(act_res_defines)
 
                  
-        stats_menu = mb.addMenu("Статистика")
-        act_stats = QAction("Статистика реплик по персонажам...", self)
+        stats_menu = mb.addMenu(tr("menu.stats"))
+        act_stats = QAction(tr("menu.stats.dialogue"), self)
         act_stats.triggered.connect(self._show_dialogue_stats)
         stats_menu.addAction(act_stats)
 
                  
-        help_menu = mb.addMenu("Справка")
+        help_menu = mb.addMenu(tr("menu.help"))
 
-        act_guide = QAction("Руководство пользователя...", self)
+        act_guide = QAction(tr("menu.help.guide"), self)
         act_guide.setShortcut(QKeySequence("F1"))
-        act_guide.setIconText("Руководство")
+        act_guide.setIconText(tr("menu.help.guide_short"))
         act_guide.triggered.connect(self._show_help)
         help_menu.addAction(act_guide)
         self.act_guide = act_guide
 
         help_menu.addSeparator()
-        act_check_updates = QAction("Проверить обновления...", self)
+        act_check_updates = QAction(tr("menu.help.check_updates"), self)
         act_check_updates.triggered.connect(lambda: self._start_update_check(manual=True))
         help_menu.addAction(act_check_updates)
 
-        self.act_autoupdate = QAction("Проверять обновления при запуске", self)
+        self.act_autoupdate = QAction(tr("menu.help.autoupdate"), self)
         self.act_autoupdate.setCheckable(True)
         self.act_autoupdate.setChecked(self.app_settings.check_updates_on_startup)
         self.act_autoupdate.toggled.connect(self._on_autoupdate_toggled)
         help_menu.addAction(self.act_autoupdate)
 
     def _setup_toolbar(self):
-        tb = QToolBar("Основная панель")
+        tb = QToolBar(tr("toolbar.main"))
         tb.setObjectName("main_toolbar")
         tb.setMovable(False)
         tb.setIconSize(QSize(18, 18))
@@ -1596,13 +1830,14 @@ class MainWindow(QMainWindow):
                           
         tb.addSeparator()
         self.lbl_project = QLabel()
-        self.lbl_project.setStyleSheet("color: #ff8c3d; font-weight: 600; padding: 0 12px;")
+        self.lbl_project.setObjectName("accent_caption")
+        self.lbl_project.setStyleSheet("padding:0 12px;")
         tb.addWidget(self.lbl_project)
 
     def _setup_statusbar(self):
         self.statusbar = QStatusBar()
         self.setStatusBar(self.statusbar)
-        self.status_lbl = QLabel("Готов")
+        self.status_lbl = QLabel(tr("mw.status_ready"))
         self.statusbar.addWidget(self.status_lbl)
         self.status_res = QLabel()
         self.statusbar.addPermanentWidget(self.status_res)
@@ -1610,9 +1845,8 @@ class MainWindow(QMainWindow):
     def _update_status(self):
         counts = {cat: len(entries) for cat, entries in self.rm.resources.items()}
         self.status_res.setText(
-            f"  BG:{counts.get('bg',0)}  CG:{counts.get('cg',0)}  "
-            f"Спрайты:{counts.get('sprites',0)}  "
-            f"Музыка:{counts.get('music',0)}  Звуки:{counts.get('sounds',0)}  "
+            tr("mw.status_resources", bg=counts.get('bg',0), cg=counts.get('cg',0),
+               sprites=counts.get('sprites',0), music=counts.get('music',0), sounds=counts.get('sounds',0))
         )
 
                                                          
@@ -1621,13 +1855,13 @@ class MainWindow(QMainWindow):
         p = self.pm.project
         self._update_title()
         if not p.scenes:
-            p.scenes.append(Scene(name="Сцена 1"))
+            p.scenes.append(Scene(name=tr("mw.default_scene_name")))
         self.scene_panel.load_project(p)
         self.node_editor.set_characters(p.characters)
         self.node_editor.refresh_resources()
         self.preview_panel.set_context(self.rm, p)
         self._update_status()
-                             
+
         if p.scenes and p.scenes[0].nodes:
             self._on_node_selected(0, 0)
         else:
@@ -1652,29 +1886,40 @@ class MainWindow(QMainWindow):
             self._update_title()
 
     def _update_title(self):
-        title = self.pm.project.title if self.pm and self.pm.project else "Проект"
+        title = self.pm.project.title if self.pm and self.pm.project else tr("mw.default_project_title")
         marker = " ●" if self._dirty else ""
-        self.setWindowTitle(f"RenPy Visual Script Editor - {title}{marker}")
+        self.setWindowTitle(tr("main_window.title_with_project", title=title, marker=marker))
         if hasattr(self, "lbl_project"):
-            self.lbl_project.setText(f"Проект: {title}{marker}")
+            self.lbl_project.setText(tr("mw.project_label", title=title, marker=marker))
 
-    def _begin_change(self, label: str = "Изменение"):
+    def _on_scene_panel_before_change(self, label: str = None):
+        """Обёртка над _begin_change для сигнала SceneListPanel.before_change:
+        сначала сбрасывает в модель то, что сейчас введено в панели
+        параметров текущей ноды (см. NodeEditor.flush), и только потом берёт
+        снапшот для истории отмены - иначе кнопки "Добавить"/"Дублировать"/
+        удаление и т.п., нажатые сразу после правки поля без явного клика по
+        "Применить", могли бы потерять последнее изменение."""
+        if hasattr(self, "node_editor"):
+            self.node_editor.flush()
+        self._begin_change(label)
+
+    def _begin_change(self, label: str = None):
         """Вызывать ПЕРЕД любой дискретной (не коалесцируемой) мутацией
         модели проекта: добавление/удаление/перемещение узла или сцены и т.п.
         Каждый вызов - это отдельный шаг в истории отмены."""
-        self.undo_manager.push(project_to_dict(self.pm.project), label)
+        self.undo_manager.push(project_to_dict(self.pm.project), label if label is not None else tr("mw.undo.change_default"))
         self._edit_group_open = False
         self._update_undo_actions()
         self._mark_dirty()
 
-    def _begin_edit_group(self, label: str = "Правка поля"):
+    def _begin_edit_group(self, label: str = None):
         """Вызывать перед мутацией, которая может повторяться много раз подряд
         не создавая новую точку истории - правка текста в поле, перетаскивание
         спрайта мышью. Снапшот берётся с момента выбора ноды/начала правки:
         все правки одной "сессии" редактирования схлопываются в один шаг
         отмены, пока не сменится выбранная нода."""
         if not self._edit_group_open:
-            self.undo_manager.push(self._node_load_snapshot, label)
+            self.undo_manager.push(self._node_load_snapshot, label if label is not None else tr("mw.undo.field_edit_default"))
             self._edit_group_open = True
             self._update_undo_actions()
         self._mark_dirty()
@@ -1693,7 +1938,7 @@ class MainWindow(QMainWindow):
         label, snap = result
         self._restore_snapshot(snap)
         self._mark_dirty()
-        self.status_lbl.setText(f"Отменено: {label}")
+        self.status_lbl.setText(tr("mw.undone_label", label=label))
 
     def _redo(self):
         current = project_to_dict(self.pm.project)
@@ -1703,7 +1948,7 @@ class MainWindow(QMainWindow):
         label, snap = result
         self._restore_snapshot(snap)
         self._mark_dirty()
-        self.status_lbl.setText(f"Повторено: {label}")
+        self.status_lbl.setText(tr("mw.redone_label", label=label))
 
     def _restore_snapshot(self, data: dict):
         keep_scene = self._current_scene_idx
@@ -1713,7 +1958,7 @@ class MainWindow(QMainWindow):
         p = self.pm.project
         self._update_title()
         if not p.scenes:
-            p.scenes.append(Scene(name="Сцена 1"))
+            p.scenes.append(Scene(name=tr("mw.default_scene_name")))
         self.scene_panel.load_project(p)
         self.node_editor.set_characters(p.characters)
         self.node_editor.refresh_resources()
@@ -1733,22 +1978,22 @@ class MainWindow(QMainWindow):
                                                         
 
     def _new_project(self):
-        reply = QMessageBox.question(self, "Новый проект",
-                                     "Создать новый проект? Несохранённые данные будут потеряны.")
+        reply = QMessageBox.question(self, tr("mw.new_project_title"),
+                                     tr("mw.new_project_confirm"))
         if reply == QMessageBox.StandardButton.Yes:
-            name, ok = QInputDialog.getText(self, "Новый проект", "Название проекта:", text="Мой проект")
+            name, ok = QInputDialog.getText(self, tr("mw.new_project_title"), tr("mw.project_name_label"), text=tr("mw.default_project_name"))
             if ok:
-                self.pm.new_project(name.strip() or "Мой проект")
+                self.pm.new_project(name.strip() or tr("mw.default_project_name"))
                 self.pm.project.characters = load_global_characters(BASE_DIR)
                 self._load_project_to_ui()
                 clear_autosave(BASE_DIR)
                 self._mark_clean()
-                self.status_lbl.setText("Новый проект создан")
+                self.status_lbl.setText(tr("mw.new_project_created"))
 
     def _open_project(self):
         path, _ = QFileDialog.getOpenFileName(
-            self, "Открыть проект", "",
-            "RenPy Editor Project (*.repj);;Все файлы (*)"
+            self, tr("mw.open_project_title"), "",
+            f"RenPy Editor Project (*.repj);;{tr('mw.all_files')} (*)"
         )
         if path:
             project = self.pm.load(path)
@@ -1757,9 +2002,9 @@ class MainWindow(QMainWindow):
                 save_global_characters(BASE_DIR, project.characters)
                 clear_autosave(BASE_DIR)
                 self._mark_clean()
-                self.status_lbl.setText(f"Загружен: {path}")
+                self.status_lbl.setText(tr("mw.loaded_label", path=path))
             else:
-                QMessageBox.critical(self, "Ошибка", "Не удалось загрузить проект")
+                QMessageBox.critical(self, tr("mw.error_title"), tr("mw.load_failed"))
 
     def _save_project(self):
         if not self.pm.current_path:
@@ -1769,37 +2014,37 @@ class MainWindow(QMainWindow):
             if ok:
                 self._mark_clean()
                 clear_autosave(BASE_DIR)
-                self.status_lbl.setText(f"Сохранено: {self.pm.current_path}")
+                self.status_lbl.setText(tr("mw.saved_label", path=self.pm.current_path))
             else:
-                QMessageBox.critical(self, "Ошибка", "Не удалось сохранить проект")
+                QMessageBox.critical(self, tr("mw.error_title"), tr("mw.save_failed"))
 
     def _save_project_as(self):
         path, _ = QFileDialog.getSaveFileName(
-            self, "Сохранить проект", f"{self.pm.project.title}.repj",
-            "RenPy Editor Project (*.repj);;Все файлы (*)"
+            self, tr("mw.save_project_title"), f"{self.pm.project.title}.repj",
+            f"RenPy Editor Project (*.repj);;{tr('mw.all_files')} (*)"
         )
         if path:
             ok = self.pm.save(path)
             if ok:
                 self._mark_clean()
                 clear_autosave(BASE_DIR)
-                self.status_lbl.setText(f"Сохранено: {path}")
+                self.status_lbl.setText(tr("mw.saved_label", path=path))
             else:
-                QMessageBox.critical(self, "Ошибка", "Не удалось сохранить проект")
+                QMessageBox.critical(self, tr("mw.error_title"), tr("mw.save_failed"))
 
                                                         
 
     def _rename_project(self):
-        name, ok = QInputDialog.getText(self, "Переименовать проект",
-                                        "Название:", text=self.pm.project.title)
+        name, ok = QInputDialog.getText(self, tr("mw.rename_project_title"),
+                                        tr("mw.name_label"), text=self.pm.project.title)
         if ok and name.strip():
-            self._begin_change("Переименован проект")
+            self._begin_change(tr("mw.undo.project_renamed"))
             self.pm.project.title = name.strip()
             self._update_title()
 
     def _set_main_label(self):
-        lbl, ok = QInputDialog.getText(self, "Главная метка",
-                                       "Имя label для входа:", text=self.pm.project.label_name)
+        lbl, ok = QInputDialog.getText(self, tr("mw.main_label_title"),
+                                       tr("mw.main_label_field"), text=self.pm.project.label_name)
         if ok and lbl.strip():
             self.pm.project.label_name = lbl.strip()
 
@@ -1811,7 +2056,7 @@ class MainWindow(QMainWindow):
     def _on_characters_changed(self, chars: list):
         self.pm.project.characters = chars
         self.node_editor.set_characters(chars)
-        self.status_lbl.setText(f"Персонажей: {len(chars)}")
+        self.status_lbl.setText(tr("mw.characters_count", count=len(chars)))
         self._refresh_preview()
         save_global_characters(BASE_DIR, chars)
 
@@ -1838,8 +2083,8 @@ class MainWindow(QMainWindow):
         from core.spellcheck_whitelist_store import SpellcheckWhitelist
         whitelist_store = SpellcheckWhitelist.load(BASE_DIR)
 
-        progress = QProgressDialog("Проверка реплик...", "Отмена", 0, 0, self)
-        progress.setWindowTitle("Проверка реплик")
+        progress = QProgressDialog(tr("mw.spellcheck_progress_text"), tr("mw.cancel"), 0, 0, self)
+        progress.setWindowTitle(tr("dialog.spellcheck_progress_title"))
         progress.setWindowModality(Qt.WindowModality.WindowModal)
         progress.setMinimumDuration(300)                                                  
         progress.setAutoClose(False)
@@ -1851,7 +2096,7 @@ class MainWindow(QMainWindow):
         def on_progress(done, total):
             if total:
                 progress.setMaximum(total)
-                progress.setLabelText(f"Проверка реплик... {done}/{total}")
+                progress.setLabelText(tr("mw.spellcheck_progress_detail", done=done, total=total))
             progress.setValue(done)
 
         def on_finished(results):
@@ -1916,9 +2161,8 @@ class MainWindow(QMainWindow):
     def _show_git_panel(self):
         if not self.pm.current_path:
             QMessageBox.information(
-                self, "Сначала сохраните проект",
-                "Версионирование работает с папкой, где лежит файл проекта. "
-                "Сначала сохраните проект (Ctrl+S), затем откройте версионирование снова."
+                self, tr("mw.save_project_first_title"),
+                tr("mw.save_project_first_text")
             )
             return
         repo_dir = os.path.dirname(os.path.abspath(self.pm.current_path))
@@ -1929,7 +2173,7 @@ class MainWindow(QMainWindow):
     def _show_screenplay_dialog(self):
         if not self.pm or not self.pm.project:
             return
-        self._begin_change("Импорт правок из текста для вычитки")
+        self._begin_change(tr("mw.undo.screenplay_import"))
         dlg = ScreenplayExportImportDialog(self.pm.project, self)
         dlg.imported.connect(self._on_find_replace_applied)
         dlg.exec()
@@ -1943,14 +2187,14 @@ class MainWindow(QMainWindow):
     def _show_find_replace(self):
         if not self.pm or not self.pm.project:
             return
-        self._begin_change("Найти и заменить")
+        self._begin_change(tr("mw.undo.find_replace"))
         dlg = FindReplaceDialog(self.pm.project, self)
         dlg.replaced.connect(self._on_find_replace_applied)
         dlg.exec()
 
     def _on_find_replace_applied(self):
         self._load_project_to_ui()
-        self.status_lbl.setText("Массовая замена текста применена.")
+        self.status_lbl.setText(tr("mw.mass_replace_applied"))
                                                                              
                                                                                
                                                    
@@ -1989,17 +2233,16 @@ class MainWindow(QMainWindow):
         mode = "add"                                      
         if collisions:
             names_preview = ", ".join(f"«{s.name}»" for s in collisions[:5])
-            more = f" и ещё {len(collisions) - 5}" if len(collisions) > 5 else ""
+            more = tr("mw.reimport_more_suffix", count=len(collisions) - 5) if len(collisions) > 5 else ""
             box = QMessageBox(self)
-            box.setWindowTitle("Повторный импорт")
+            box.setWindowTitle(tr("dialog.reimport_title"))
             box.setText(
-                f"{len(collisions)} импортируемых сцен уже есть в проекте по имени метки "
-                f"({names_preview}{more}).\n\nЧто сделать с совпадающими?"
+                tr("mw.reimport_collision_text", count=len(collisions), names=names_preview, more=more)
             )
-            btn_replace = box.addButton("🔄 Заменить содержимое", QMessageBox.ButtonRole.AcceptRole)
-            btn_skip = box.addButton("⏭ Пропустить совпадающие", QMessageBox.ButtonRole.YesRole)
-            btn_dupe = box.addButton("➕ Всё равно добавить как дубликаты", QMessageBox.ButtonRole.DestructiveRole)
-            box.addButton("Отмена", QMessageBox.ButtonRole.RejectRole)
+            btn_replace = box.addButton(tr("mw.reimport_replace"), QMessageBox.ButtonRole.AcceptRole)
+            btn_skip = box.addButton(tr("mw.reimport_skip"), QMessageBox.ButtonRole.YesRole)
+            btn_dupe = box.addButton(tr("mw.reimport_dupe"), QMessageBox.ButtonRole.DestructiveRole)
+            box.addButton(tr("mw.reimport_cancel"), QMessageBox.ButtonRole.RejectRole)
             box.exec()
             clicked = box.clickedButton()
             if clicked == btn_replace:
@@ -2026,12 +2269,12 @@ class MainWindow(QMainWindow):
             added += 1
 
         self._load_project_to_ui()
-        parts = [f"добавлено сцен: {added}"]
+        parts = [tr("mw.import_added", count=added)]
         if replaced:
-            parts.append(f"заменено: {replaced}")
+            parts.append(tr("mw.import_replaced", count=replaced))
         if skipped:
-            parts.append(f"пропущено (уже есть): {skipped}")
-        self.status_lbl.setText("Импорт - " + ", ".join(parts))
+            parts.append(tr("mw.import_skipped", count=skipped))
+        self.status_lbl.setText(tr("mw.import_prefix", parts=", ".join(parts)))
 
     def _on_characters_imported(self, parsed_characters: list):
         existing_vars = {c.variable for c in self.pm.project.characters}
@@ -2057,12 +2300,12 @@ class MainWindow(QMainWindow):
         if added:
             self._on_characters_changed(self.pm.project.characters)
         if matched_by_name or skipped_same_var:
-            parts = [f"добавлено новых: {added}"]
+            parts = [tr("mw.chars_import_added", count=added)]
             if matched_by_name:
-                parts.append(f"совпало по имени (дубликаты не созданы): {matched_by_name}")
+                parts.append(tr("mw.chars_import_matched_by_name", count=matched_by_name))
             if skipped_same_var:
-                parts.append(f"уже было (та же переменная): {skipped_same_var}")
-            self.status_lbl.setText("Импорт персонажей - " + ", ".join(parts))
+                parts.append(tr("mw.chars_import_already_existed", count=skipped_same_var))
+            self.status_lbl.setText(tr("mw.chars_import_prefix", parts=", ".join(parts)))
 
     def _show_resources_download(self):
         dlg = ResourcesDownloadDialog(self)
@@ -2082,7 +2325,7 @@ class MainWindow(QMainWindow):
                                                       
         if self._update_thread is not None and self._update_thread.isRunning():
             if manual:
-                QMessageBox.information(self, "Обновления", "Проверка уже выполняется, подождите.")
+                QMessageBox.information(self, tr("mw.updates_title"), tr("mw.update_check_in_progress"))
             return
         self._update_thread = UpdateCheckThread()
         self._update_thread.finished_check.connect(
@@ -2094,8 +2337,8 @@ class MainWindow(QMainWindow):
         if not release:
             if manual:
                 QMessageBox.information(
-                    self, "Обновления",
-                    f"У вас установлена последняя версия (текущая: {self._app_version()})."
+                    self, tr("mw.updates_title"),
+                    tr("mw.latest_version_installed", version=self._app_version())
                 )
             return
 
@@ -2127,7 +2370,7 @@ class MainWindow(QMainWindow):
         self.node_editor.refresh_resources()
         self._update_status()
         counts = sum(len(v) for v in self.rm.resources.values())
-        self.status_lbl.setText(f"Ресурсы переиндексированы: {counts} файлов")
+        self.status_lbl.setText(tr("mw.resources_rescanned", count=counts))
         self._refresh_preview()
 
                                                             
@@ -2147,8 +2390,8 @@ class MainWindow(QMainWindow):
         self._branch_choice_idx = choice_idx
         self._branch_return_scene_idx = getattr(self, "_current_scene_idx", -1)
         self._branch_return_node_idx = getattr(self, "_current_node_idx", -1)
-        branch_scene = Scene(name=f"Ветка меню: {text or '(без текста)'}", nodes=nodes, groups=[])
-        label = f"✏️ Ветка меню: «{(text or '(без текста)')[:40]}»"
+        branch_scene = Scene(name=tr("mw.menu_branch_scene_name", text=text or tr("mw.menu_branch_no_text")), nodes=nodes, groups=[])
+        label = tr("mw.menu_branch_label", text=(text or tr("mw.menu_branch_no_text"))[:40])
         self.scene_panel.enter_branch(branch_scene, label)
         if nodes:
             self.scene_panel._select_node_row(0)
@@ -2184,7 +2427,7 @@ class MainWindow(QMainWindow):
         p = self.pm.project
         scene_idx = next((i for i, s in enumerate(p.scenes) if s.scene_id == scene_id), None)
         if scene_idx is None:
-            QMessageBox.warning(self, "Не найдено", "Сцена с этим использованием больше не существует.")
+            QMessageBox.warning(self, tr("mw.not_found_title"), tr("mw.usage_scene_gone"))
             return
         if self.scene_panel.is_in_branch_mode():
             self._exit_menu_branch()
@@ -2196,7 +2439,7 @@ class MainWindow(QMainWindow):
                 return
             menu_idx = next((i for i, n in enumerate(scene.nodes) if n.node_id == menu_node_id), -1)
             if menu_idx < 0:
-                QMessageBox.warning(self, "Не найдено", "Ветка меню, ведущая к использованию, больше не найдена.")
+                QMessageBox.warning(self, tr("mw.not_found_title"), tr("mw.usage_branch_gone"))
                 return
             self.scene_panel._select_node_row(menu_idx)
             self._enter_menu_branch(scene.nodes[menu_idx], choice_idx)
@@ -2206,7 +2449,7 @@ class MainWindow(QMainWindow):
             return
         node_idx = next((i for i, n in enumerate(scene.nodes) if n.node_id == node_id), -1)
         if node_idx < 0:
-            QMessageBox.warning(self, "Не найдено", "Нода с этим использованием больше не найдена.")
+            QMessageBox.warning(self, tr("mw.not_found_title"), tr("mw.usage_node_gone"))
             return
         self.scene_panel._select_node_row(node_idx)
         self.raise_()
@@ -2214,6 +2457,8 @@ class MainWindow(QMainWindow):
 
     def _on_node_selected(self, scene_idx: int, node_idx: int):
         p = self.pm.project
+        if hasattr(self, "node_editor"):
+            self.node_editor.flush()
         self._current_scene_idx = scene_idx
         self._current_node_idx = node_idx
         self._edit_group_open = False
@@ -2241,13 +2486,13 @@ class MainWindow(QMainWindow):
     def _on_node_field_changed(self, *args):
         node = self.node_editor.node
         hint = node.preview_text()[:50] if node else ""
-        self._begin_edit_group(f"Правка ноды: {hint}")
+        self._begin_edit_group(tr("mw.undo.node_edit", hint=hint))
         self._on_node_changed(*args)
 
     def _on_sprite_dragged_in_preview(self, xalign: float):
         node = self.node_editor.node
         hint = node.preview_text()[:50] if node else ""
-        self._begin_edit_group(f"Перемещение спрайта: {hint}")
+        self._begin_edit_group(tr("mw.undo.sprite_move", hint=hint))
         self.node_editor.sync_xalign_from_preview(xalign)
         self.scene_panel.refresh_current_node_text()
 
@@ -2273,8 +2518,8 @@ class MainWindow(QMainWindow):
 
     def _show_code_preview(self):
         full = generate_full_script(self.pm.project, rm=self.rm, custom_templates=self.custom_node_template_store,
-                                     nvl_style=self.app_settings.nvl_codegen_style)
-        defines = generate_defines_only(self.pm.project)
+                                     nvl_style=self.app_settings.nvl_codegen_style, include_defines=False)
+        defines = generate_defines_only(self.pm.project, nvl_style=self.app_settings.nvl_codegen_style, rm=self.rm)
         res_defines = self.rm.generate_define_block()
         combined_defines = res_defines + "\n" + defines
         dlg = CodePreviewDialog(full, combined_defines, self)
@@ -2307,7 +2552,7 @@ class MainWindow(QMainWindow):
         if not self.pm or not self.pm.project:
             return
         if not self.pm.project.scenes:
-            QMessageBox.information(self, "Экспорт", "В проекте нет ни одной сцены.")
+            QMessageBox.information(self, tr("mw.export_title"), tr("mw.no_scenes_to_export"))
             return
         dlg = SplitExportDialog(self.pm.project, rm=self.rm,
                                  custom_templates=self.custom_node_template_store, parent=self,
@@ -2316,8 +2561,8 @@ class MainWindow(QMainWindow):
 
     def _export_rpy(self):
         path, _ = QFileDialog.getSaveFileName(
-            self, "Экспорт сценария", "script.rpy",
-            "Ren'Py Script (*.rpy);;Все файлы (*)"
+            self, tr("mw.export_script_title"), "script.rpy",
+            f"Ren'Py Script (*.rpy);;{tr('mw.all_files2')} (*)"
         )
         if path:
             try:
@@ -2325,44 +2570,46 @@ class MainWindow(QMainWindow):
                                              nvl_style=self.app_settings.nvl_codegen_style)
                 written_path = self._write_rpy_with_diff_check(path, code)
                 if written_path is None:
-                    self.status_lbl.setText("Экспорт отменён")
+                    self.status_lbl.setText(tr("mw.export_cancelled"))
                     return
-                self.status_lbl.setText(f"Экспортировано: {written_path}")
-                QMessageBox.information(self, "Готово", f"Сценарий сохранён:\n{written_path}")
+                self.status_lbl.setText(tr("mw.exported_label", path=written_path))
+                QMessageBox.information(self, tr("mw.done_title"), tr("mw.script_saved_text", path=written_path))
             except Exception as e:
-                QMessageBox.critical(self, "Ошибка", str(e))
+                QMessageBox.critical(self, tr("mw.error_title"), str(e))
 
     def _export_defines(self):
         path, _ = QFileDialog.getSaveFileName(
-            self, "Экспорт defines", "defines.rpy",
-            "Ren'Py Script (*.rpy);;Все файлы (*)"
+            self, tr("mw.export_defines_title"), "defines.rpy",
+            f"Ren'Py Script (*.rpy);;{tr('mw.all_files2')} (*)"
         )
         if path:
             try:
-                code = self.rm.generate_define_block() + "\n" + generate_defines_only(self.pm.project)
+                code = self.rm.generate_define_block() + "\n" + generate_defines_only(
+                    self.pm.project, nvl_style=self.app_settings.nvl_codegen_style, rm=self.rm
+                )
                 written_path = self._write_rpy_with_diff_check(path, code)
                 if written_path is None:
-                    self.status_lbl.setText("Экспорт отменён")
+                    self.status_lbl.setText(tr("mw.export_cancelled"))
                     return
-                self.status_lbl.setText(f"Defines экспортированы: {written_path}")
+                self.status_lbl.setText(tr("mw.defines_exported", path=written_path))
             except Exception as e:
-                QMessageBox.critical(self, "Ошибка", str(e))
+                QMessageBox.critical(self, tr("mw.error_title"), str(e))
 
     def _export_resource_defines(self):
         path, _ = QFileDialog.getSaveFileName(
-            self, "Экспорт defines ресурсов", "resources_defines.rpy",
-            "Ren'Py Script (*.rpy);;Все файлы (*)"
+            self, tr("mw.export_resource_defines_title"), "resources_defines.rpy",
+            f"Ren'Py Script (*.rpy);;{tr('mw.all_files2')} (*)"
         )
         if path:
             try:
                 code = self.rm.generate_define_block()
                 written_path = self._write_rpy_with_diff_check(path, code)
                 if written_path is None:
-                    self.status_lbl.setText("Экспорт отменён")
+                    self.status_lbl.setText(tr("mw.export_cancelled"))
                     return
-                self.status_lbl.setText(f"Defines ресурсов сохранены: {written_path}")
+                self.status_lbl.setText(tr("mw.resource_defines_saved", path=written_path))
             except Exception as e:
-                QMessageBox.critical(self, "Ошибка", str(e))
+                QMessageBox.critical(self, tr("mw.error_title"), str(e))
 
     def closeEvent(self, event):
         self.app_settings.window_geometry = bytes(self.saveGeometry()).hex()
@@ -2375,8 +2622,8 @@ class MainWindow(QMainWindow):
             return
 
         reply = QMessageBox.question(
-            self, "Выход",
-            "Сохранить проект перед выходом?",
+            self, tr("mw.exit_title"),
+            tr("mw.save_before_exit"),
             QMessageBox.StandardButton.Save |
             QMessageBox.StandardButton.Discard |
             QMessageBox.StandardButton.Cancel

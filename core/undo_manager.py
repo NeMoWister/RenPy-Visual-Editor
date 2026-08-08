@@ -27,7 +27,7 @@ class UndoManager:
     def push(self, snapshot: dict, label: str = "Изменение"):
         """Сохраняет снапшот состояния ДО мутации. Вызывать перед изменением
         модели. Любой push сбрасывает redo-стек (стандартное поведение
-        undo/redo - новое действие "затирает" будущее)."""
+        undo/redo - новое действие "затирает" будущее)."""      
         self._undo_stack.append((label, snapshot))
         if len(self._undo_stack) > self.max_depth:
             self._undo_stack.pop(0)
@@ -56,7 +56,7 @@ class UndoManager:
     def undo_to_depth(self, current_snapshot: dict, depth: int) -> Optional[dict]:
         """Отменяет сразу `depth` последних действий (depth=1 - как обычный
         undo, depth=3 - как три Ctrl+Z подряд). Возвращает итоговый снапшот
-        или None, если стек короче depth."""
+        или None, если стек короче depth."""   
         if depth < 1 or depth > len(self._undo_stack):
             return None
         snap = current_snapshot
@@ -69,7 +69,7 @@ class UndoManager:
 
     def history_labels(self) -> List[str]:
         """Метки ещё отменяемых действий, от самого старого к самому
-        недавнему (индекс i соответствует "отменить (i+1) раз")."""
+        недавнему (индекс i соответствует "отменить (i+1) раз")."""    
         return [label for label, _ in self._undo_stack]
 
     def clear(self):

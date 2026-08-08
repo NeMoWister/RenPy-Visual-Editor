@@ -15,6 +15,7 @@ from PyQt6.QtGui import QColor
 
 from core.rpy_script_import import parse_script, ScriptImportReport
 from core.models import Scene
+from core.i18n import tr
 
 
 class ImportScriptDialog(QDialog):
@@ -24,34 +25,31 @@ class ImportScriptDialog(QDialog):
         super().__init__(parent)
         self.rm = resource_manager
         self.report: ScriptImportReport = ScriptImportReport()
-        self.setWindowTitle("Импорт .rpy сценария")
+        self.setWindowTitle(tr("import_script.title"))
         self.setMinimumSize(880, 600)
+        from ui.theme import fit_window_to_screen
+        fit_window_to_screen(self, 880, 600, min_w=700, min_h=480)
         self._setup_ui()
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
 
-        hint = QLabel(
-            "Выберите .rpy файл сценария. Редактор распознает известные конструкции "
-            "(scene/show/hide/play/stop/menu/jump/return/pause/диалог) и создаст "
-            "соответствующие узлы. Всё нераспознанное сохраняется как Python-узел "
-            "и не теряется при экспорте обратно."
-        )
+        hint = QLabel(tr("import_script.hint"))
         hint.setWordWrap(True)
-        hint.setStyleSheet("color:#999; font-size:11px;")
+        hint.setObjectName("hint_text")
         layout.addWidget(hint)
 
         top_row = QHBoxLayout()
-        btn_file = QPushButton("📄 Открыть .rpy файл...")
+        btn_file = QPushButton(tr("import_script.open_file"))
         btn_file.clicked.connect(self._pick_file)
         top_row.addWidget(btn_file)
-        self.file_lbl = QLabel("Файл не выбран")
-        self.file_lbl.setStyleSheet("color:#888;")
+        self.file_lbl = QLabel(tr("import_script.no_file"))
+        self.file_lbl.setObjectName("hint_text")
         top_row.addWidget(self.file_lbl, 1)
         layout.addLayout(top_row)
 
         self.stat_lbl = QLabel("")
-        self.stat_lbl.setStyleSheet("color:#aaa; font-size:11px;")
+        self.stat_lbl.setObjectName("hint_text")
         layout.addWidget(self.stat_lbl)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -63,15 +61,15 @@ class ImportScriptDialog(QDialog):
         left_w = QWidget()
         left_l = QVBoxLayout(left_w)
         left_l.setContentsMargins(0, 0, 0, 0)
-        left_l.addWidget(QLabel("Найденные сцены и узлы:"))
+        left_l.addWidget(QLabel(tr("import_script.found_scenes")))
 
         check_row = QHBoxLayout()
-        btn_all = QPushButton("Все")
+        btn_all = QPushButton(tr("import_script.all"))
         btn_all.setObjectName("btn_secondary")
         btn_all.setFixedWidth(70)
         btn_all.clicked.connect(self._check_all)
         check_row.addWidget(btn_all)
-        btn_none = QPushButton("Ни одной")
+        btn_none = QPushButton(tr("import_script.none"))
         btn_none.setObjectName("btn_secondary")
         btn_none.setFixedWidth(120)
         btn_none.clicked.connect(self._check_none)
@@ -80,7 +78,7 @@ class ImportScriptDialog(QDialog):
         left_l.addLayout(check_row)
 
         self.tree = QTreeWidget()
-        self.tree.setHeaderLabels(["Сцена / Узел"])
+        self.tree.setHeaderLabels([tr("import_script.col_scene_node")])
         self.tree.setColumnCount(1)
         self.tree.itemChanged.connect(self._on_item_changed)
         left_l.addWidget(self.tree, 1)
@@ -90,29 +88,29 @@ class ImportScriptDialog(QDialog):
         right_w = QWidget()
         right_l = QVBoxLayout(right_w)
         right_l.setContentsMargins(0, 0, 0, 0)
-        right_l.addWidget(QLabel("Нераспознанные строки (будут PYTHON-узлами):"))
+        right_l.addWidget(QLabel(tr("import_script.unrecognized_label")))
         self.unrecog_edit = QTextEdit()
         self.unrecog_edit.setReadOnly(True)
-        self.unrecog_edit.setPlaceholderText("Нераспознанного нет - отлично!")
-        self.unrecog_edit.setStyleSheet("background:#1c1c22; color:#ddd; border:1px solid #3a3a46;")
+        self.unrecog_edit.setPlaceholderText(tr("import_script.unrecognized_placeholder"))
+        self.unrecog_edit.setObjectName("code_box")
         right_l.addWidget(self.unrecog_edit, 1)
 
-        right_l.addWidget(QLabel("⚠ Импортированы, но ресурс не найден - нужно добавить:"))
+        right_l.addWidget(QLabel(tr("import_script.needs_resource_label")))
         self.needs_res_edit = QTextEdit()
         self.needs_res_edit.setReadOnly(True)
-        self.needs_res_edit.setPlaceholderText("Все ресурсы найдены - отлично!")
-        self.needs_res_edit.setStyleSheet("background:#241c14; color:#ffcf8a; border:1px solid #4a3a20;")
+        self.needs_res_edit.setPlaceholderText(tr("import_script.needs_resource_placeholder"))
+        self.needs_res_edit.setObjectName("warning_banner")
         right_l.addWidget(self.needs_res_edit, 1)
         splitter.addWidget(right_w)
         splitter.setSizes([560, 300])
 
         btn_bottom = QHBoxLayout()
-        btn_cancel = QPushButton("Отмена")
+        btn_cancel = QPushButton(tr("import_script.cancel"))
         btn_cancel.setObjectName("btn_secondary")
         btn_cancel.clicked.connect(self.reject)
         btn_bottom.addWidget(btn_cancel)
         btn_bottom.addStretch()
-        self.btn_import = QPushButton("⬇ Импортировать выбранные сцены")
+        self.btn_import = QPushButton(tr("import_script.import_selected"))
         self.btn_import.setEnabled(False)
         self.btn_import.clicked.connect(self._import)
         btn_bottom.addWidget(self.btn_import)
@@ -122,7 +120,7 @@ class ImportScriptDialog(QDialog):
 
     def _pick_file(self):
         path, _ = QFileDialog.getOpenFileName(
-            self, "Открыть .rpy файл", "", "Ren'Py script (*.rpy)")
+            self, tr("import_script.open_file_title"), "", "Ren'Py script (*.rpy)")
         if not path:
             return
         self.file_lbl.setText(os.path.basename(path))
@@ -130,7 +128,7 @@ class ImportScriptDialog(QDialog):
             with open(path, 'r', encoding='utf-8') as f:
                 text = f.read()
         except Exception as e:
-            QMessageBox.critical(self, "Ошибка чтения", str(e))
+            QMessageBox.critical(self, tr("import_script.read_error_title"), str(e))
             return
         self.report = parse_script(text, os.path.basename(path), rm=self.rm)
         self._fill_tree()
@@ -164,10 +162,8 @@ class ImportScriptDialog(QDialog):
         )
         pct = self.report.recognized_pct
         self.stat_lbl.setText(
-            f"Сцен: {len(self.report.scenes)}  |  "
-            f"Узлов: {self.report.total_nodes}  |  "
-            f"Распознано: {pct:.0f}%  |  "
-            f"Нераспознано (raw): {raw}"
+            tr("import_script.stats", scenes=len(self.report.scenes),
+               nodes=self.report.total_nodes, pct=pct, raw=raw)
         )
         self.btn_import.setEnabled(ok)
 
@@ -175,14 +171,14 @@ class ImportScriptDialog(QDialog):
         if not self.report.unrecognized:
             self.unrecog_edit.setPlainText("")
         else:
-            lines = [f"Строка {ln}: {txt}" for ln, txt in self.report.unrecognized]
+            lines = [tr("import_script.line_prefix", line=ln, text=txt) for ln, txt in self.report.unrecognized]
             self.unrecog_edit.setPlainText('\n'.join(lines))
 
         needs_res = getattr(self.report, "needs_resource", [])
         if not needs_res:
             self.needs_res_edit.setPlainText("")
         else:
-            lines = [f"Строка {ln}: {txt}  →  ресурс «{var}»" for ln, txt, var in needs_res]
+            lines = [tr("import_script.needs_res_line", line=ln, text=txt, var=var) for ln, txt, var in needs_res]
             self.needs_res_edit.setPlainText('\n'.join(lines))
 
                                                                           
@@ -213,7 +209,7 @@ class ImportScriptDialog(QDialog):
                 if scene:
                     selected.append(scene)
         if not selected:
-            QMessageBox.information(self, "Импорт", "Не выбрано ни одной сцены.")
+            QMessageBox.information(self, tr("import_script.dialog_title"), tr("import_script.no_scenes_selected"))
             return
         self.scenes_imported.emit(selected)
         self.accept()

@@ -2,11 +2,14 @@
 import os
 from typing import Optional, List
 from PyQt6.QtWidgets import QWidget
-from PyQt6.QtCore import Qt, QRect, QRectF, QPoint, pyqtSignal
+from PyQt6.QtCore import Qt, QRect, QRectF, QPoint, QTimer, QElapsedTimer, pyqtSignal
 from PyQt6.QtGui import QPainter, QPixmap, QColor, QFont, QPen, QTextDocument
 from ui.pixmap_cache import get_scaled
 from core.models import ANCHOR_POSITIONS, NAMED_SPRITE_POSITIONS, nearest_anchor_name
 from core.renpy_text_tags import parse_renpy_text, runs_to_html
+from core import atl as atl_engine
+from core.transitions import TransitionSpec, TransitionKind
+from ui.transition_compositor import render_transition_frame, punch_offset
 
 PREVIEW_W = 640
 PREVIEW_H = 360
@@ -24,12 +27,15 @@ def _snap_to_anchor(xalign: float) -> float:
 
 
 class SpriteLayer:
-    def __init__(self, pixmap: QPixmap, xalign: float, yalign: float, zoom: float = 1.0, tag: str = ""):
+    def __init__(self, pixmap: QPixmap, xalign: float, yalign: float, zoom: float = 1.0, tag: str = "",
+                 atl_script: str = "", image_variants: Optional[dict] = None):
         self.pixmap = pixmap
         self.xalign = xalign
         self.yalign = yalign
         self.zoom = zoom
         self.tag = tag
+        self.atl_script = atl_script                                                        
+        self.image_variants = image_variants or {}                                                                
 
 
 class ScenePreview(QWidget):
@@ -52,8 +58,153 @@ class ScenePreview(QWidget):
         self.did_drag = False
         self.hover_sprite_idx: Optional[int] = None
         self.scale_factor: float = 1.0
+        self.bg_atl_script: str = ""
+        self._mask_resolver = None                                                        
+        self._active_transition = None                                                    
+        self._atl_clock = QElapsedTimer()
+        self._atl_clock.start()
+        self._atl_timer = QTimer(self)
+        self._atl_timer.setInterval(33)
+        self._atl_timer.timeout.connect(self._on_atl_tick)
+        self._atl_timer.start()
         self.setFixedSize(PREVIEW_W, PREVIEW_H)
         self.setMouseTracking(True)
+
+    def _on_atl_tick(self):
+        """Живой предпросмотр ATL/переходов - перерисовывает кадр, только
+        если реально что-то анимировано, чтобы не жечь CPU на статичных
+        сценах."""
+        if self._active_transition is not None:
+            self.update()
+            return
+        if self.bg_atl_script and atl_engine.is_animated(self.bg_atl_script):
+            self.update()
+            return
+        for layer in self.sprites:
+            if layer.atl_script and atl_engine.is_animated(layer.atl_script):
+                self.update()
+                return
+
+    def set_mask_resolver(self, fn):
+        """fn(rel_path) -> abs_path|None - разрешает путь маски кастомного
+        ImageDissolve-перехода в файл на диске (см. core/transitions.py)."""
+        self._mask_resolver = fn
+
+    def snapshot_current(self) -> QPixmap:
+        """Снимок текущего кадра (фон+спрайты, БЕЗ редакторских оверлеев) -
+        вызывается ПЕРЕД тем, как поменять состояние сцены, чтобы было с чем
+        честно проиграть переход (см. start_transition)."""
+        return self._render_scene_pixmap()
+
+    def start_transition(self, old_pixmap: Optional[QPixmap], spec: Optional[TransitionSpec]):
+        """Запускает честное проигрывание перехода old_pixmap -> текущее
+        состояние (уже применённое к этому моменту через set_background/
+        set_sprites) по спеке spec. Для PUNCH (тряска экрана) old_pixmap не
+        нужен - просто трясётся текущий (уже новый) кадр."""
+        if spec is None:
+            return
+        if spec.kind != TransitionKind.PUNCH and old_pixmap is None:
+            return
+        new_pixmap = self._render_scene_pixmap() if spec.kind != TransitionKind.PUNCH else None
+        clock = QElapsedTimer()
+        clock.start()
+        self._active_transition = (old_pixmap, new_pixmap, spec, clock)
+        self.update()
+
+    def _render_scene_pixmap(self) -> QPixmap:
+        """Рендерит ТЕКУЩЕЕ состояние (фон+спрайты, без UI-оверлеев вроде
+        рамок выделения) в офф-скрин QPixmap логического размера
+        PREVIEW_W x PREVIEW_H - используется для снимков переходов."""
+        pm = QPixmap(PREVIEW_W, PREVIEW_H)
+        pm.fill(QColor(20, 20, 30))
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        self._paint_bg(p)
+        self._paint_sprites(p, with_overlays=False)
+        p.end()
+        return pm
+
+    def _paint_bg(self, painter: QPainter):
+        if self.bg_pixmap:
+            if self.bg_atl_script and self.bg_atl_script.strip():
+                t = self._atl_clock.elapsed() / 1000.0
+                vis = atl_engine.resolve_visual(
+                    self.bg_atl_script, t, base_xalign=0.5, base_yalign=0.5, base_zoom=1.0,
+                )
+                dx = (vis["xalign"] - 0.5) * PREVIEW_W
+                dy = (vis["yalign"] - 0.5) * PREVIEW_H
+                zoom = max(0.2, min(3.0, vis["zoom"]))
+                painter.save()
+                painter.translate(PREVIEW_W / 2, PREVIEW_H / 2)
+                painter.rotate(vis["rotate"])
+                painter.scale(zoom, zoom)
+                painter.translate(-PREVIEW_W / 2 + dx, -PREVIEW_H / 2 + dy)
+                painter.setOpacity(max(0.0, min(1.0, vis["alpha"])))
+                painter.drawPixmap(0, 0, self.bg_pixmap)
+                painter.restore()
+            else:
+                painter.drawPixmap(0, 0, self.bg_pixmap)
+        else:
+            painter.fillRect(0, 0, PREVIEW_W, PREVIEW_H, QColor(20, 20, 30))
+            painter.setPen(QColor(60, 60, 80))
+            painter.setFont(QFont("Arial", 16))
+            painter.drawText(QRect(0, 0, PREVIEW_W, PREVIEW_H), Qt.AlignmentFlag.AlignCenter, "[ Фон не задан ]")
+
+    def _paint_sprites(self, painter: QPainter, with_overlays: bool = True):
+        if with_overlays and self.dragging_sprite_idx is not None:
+            painter.setFont(QFont("Arial", 8))
+            active_layer = self.sprites[self.dragging_sprite_idx]
+            for name, _ in ANCHOR_POSITIONS:
+                ax = NAMED_SPRITE_POSITIONS[name].xalign
+                x = int(ax * PREVIEW_W)
+                is_active = abs(ax - active_layer.xalign) < 1e-6
+                color = QColor(255, 140, 0, 220) if is_active else QColor(255, 255, 255, 60)
+                painter.setPen(QPen(color, 2 if is_active else 1, Qt.PenStyle.DashLine))
+                painter.drawLine(x, 0, x, PREVIEW_H)
+                painter.setPen(color)
+                painter.drawText(x - 15, 12, name)
+
+        for i, layer in enumerate(self.sprites):
+            rect = self._sprite_rect(layer)
+            vis = self._resolved_layer_transform(layer)
+            draw_pixmap = layer.pixmap
+            if vis.get("image_text") and layer.image_variants:
+                draw_pixmap = layer.image_variants.get(vis["image_text"], layer.pixmap)
+            scaled = draw_pixmap.scaled(rect.width(), rect.height(),
+                                         Qt.AspectRatioMode.KeepAspectRatio,
+                                         Qt.TransformationMode.SmoothTransformation)
+            painter.save()
+            painter.setOpacity(max(0.0, min(1.0, vis["alpha"])))
+            if abs(vis["rotate"]) > 1e-6:
+                center = rect.center()
+                painter.translate(center)
+                painter.rotate(vis["rotate"])
+                painter.translate(-center)
+            painter.drawPixmap(rect.x(), rect.y(), scaled)
+            painter.restore()
+            if not with_overlays:
+                continue
+            if self.dragging_sprite_idx == i:
+                painter.setPen(QPen(QColor(255, 140, 0), 2))
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.drawRect(rect)
+            elif self.hover_sprite_idx == i:
+                painter.setPen(QPen(QColor(255, 60, 60), 2, Qt.PenStyle.DashLine))
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.drawRect(rect)
+                hint_text = "✕ удалить"
+                painter.setFont(QFont("Arial", 9, QFont.Weight.Bold))
+                text_w = painter.fontMetrics().horizontalAdvance(hint_text) + 12
+                hint_w = max(rect.width(), text_w)
+                hint_x = rect.x() + rect.width() // 2 - hint_w // 2
+                hint_y = max(0, rect.y() - 18)
+                hint_rect = QRect(hint_x, hint_y, hint_w, 16)
+                painter.fillRect(hint_rect, QColor(40, 0, 0, 200))
+                painter.setPen(QPen(QColor(255, 60, 60), 1))
+                painter.drawRect(hint_rect)
+                painter.setPen(QColor(255, 120, 120))
+                painter.drawText(hint_rect, Qt.AlignmentFlag.AlignCenter, hint_text)
 
     def set_scale(self, factor: float):
         """Масштабирует превью целиком (от слайдера зума), не меняя логику
@@ -65,7 +216,7 @@ class ScenePreview(QWidget):
     def _to_logical(self, pos: QPoint) -> QPoint:
         return QPoint(int(pos.x() / self.scale_factor), int(pos.y() / self.scale_factor))
 
-    def set_background(self, path: Optional[str]):
+    def set_background(self, path: Optional[str], atl_script: str = ""):
         if path and os.path.isfile(path):
             self.bg_pixmap = get_scaled(
                 path, PREVIEW_W, PREVIEW_H,
@@ -73,6 +224,8 @@ class ScenePreview(QWidget):
             )
         else:
             self.bg_pixmap = None
+        self.bg_atl_script = atl_script
+        self._atl_clock.restart()
         self.update()
 
     def set_sprites(self, sprite_layers: List[SpriteLayer]):
@@ -100,17 +253,31 @@ class ScenePreview(QWidget):
             self.nvl_history = history
             self.update()
 
+    def _resolved_layer_transform(self, layer: SpriteLayer) -> dict:
+        """Честно проигранное на текущий момент состояние ATL-блока спрайта
+        (см. core/atl.py) - xalign/yalign/zoom/alpha/rotate; если у слоя нет
+        своего atl_script, просто возвращает его статичные значения."""
+        if not layer.atl_script:
+            return {"xalign": layer.xalign, "yalign": layer.yalign, "zoom": layer.zoom,
+                    "alpha": 1.0, "rotate": 0.0}
+        t = self._atl_clock.elapsed() / 1000.0
+        return atl_engine.resolve_visual(
+            layer.atl_script, t, base_xalign=layer.xalign,
+            base_yalign=layer.yalign, base_zoom=layer.zoom,
+        )
+
     def _sprite_rect(self, layer: SpriteLayer) -> QRect:
         pm = layer.pixmap
-        w = int(pm.width() * layer.zoom)
-        h = int(pm.height() * layer.zoom)
+        vis = self._resolved_layer_transform(layer)
+        w = int(pm.width() * vis["zoom"])
+        h = int(pm.height() * vis["zoom"])
         max_h = int(PREVIEW_H * 0.85)
         if h > max_h:
             scale = max_h / h
             w = int(w * scale)
             h = max_h
-        x = int(layer.xalign * PREVIEW_W - w / 2)
-        y = PREVIEW_H - h - 10
+        x = int(vis["xalign"] * PREVIEW_W - w / 2)
+        y = int(vis["yalign"] * PREVIEW_H - h) - 10
         return QRect(x, y, w, h)
 
     def _sprite_at(self, pos: QPoint) -> Optional[int]:
@@ -125,60 +292,26 @@ class ScenePreview(QWidget):
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         painter.scale(self.scale_factor, self.scale_factor)
 
-        if self.bg_pixmap:
-            painter.drawPixmap(0, 0, self.bg_pixmap)
+        if self._active_transition is not None:
+            old_pm, new_pm, spec, clock = self._active_transition
+            t = clock.elapsed() / 1000.0
+            if spec.kind == TransitionKind.PUNCH:
+                dx, dy = punch_offset(spec, t)
+                painter.save()
+                painter.translate(dx, dy)
+                self._paint_bg(painter)
+                self._paint_sprites(painter)
+                painter.restore()
+            else:
+                render_transition_frame(
+                    painter, QRect(0, 0, PREVIEW_W, PREVIEW_H), old_pm, new_pm, spec, t,
+                    mask_resolver=self._mask_resolver,
+                )
+            if t >= spec.total_duration:
+                self._active_transition = None
         else:
-            painter.fillRect(0, 0, PREVIEW_W, PREVIEW_H, QColor(20, 20, 30))
-            painter.setPen(QColor(60, 60, 80))
-            painter.setFont(QFont("Arial", 16))
-            painter.drawText(QRect(0, 0, PREVIEW_W, PREVIEW_H), Qt.AlignmentFlag.AlignCenter, "[ Фон не задан ]")
-
-        if self.dragging_sprite_idx is not None:
-                                                                    
-                                                                         
-                                                          
-            painter.setFont(QFont("Arial", 8))
-            active_layer = self.sprites[self.dragging_sprite_idx]
-            for name, _ in ANCHOR_POSITIONS:
-                ax = NAMED_SPRITE_POSITIONS[name].xalign
-                x = int(ax * PREVIEW_W)
-                is_active = abs(ax - active_layer.xalign) < 1e-6
-                color = QColor(255, 140, 0, 220) if is_active else QColor(255, 255, 255, 60)
-                painter.setPen(QPen(color, 2 if is_active else 1, Qt.PenStyle.DashLine))
-                painter.drawLine(x, 0, x, PREVIEW_H)
-                painter.setPen(color)
-                painter.drawText(x - 15, 12, name)
-
-        for i, layer in enumerate(self.sprites):
-            rect = self._sprite_rect(layer)
-            scaled = layer.pixmap.scaled(rect.width(), rect.height(),
-                                         Qt.AspectRatioMode.KeepAspectRatio,
-                                         Qt.TransformationMode.SmoothTransformation)
-            painter.drawPixmap(rect.x(), rect.y(), scaled)
-            if self.dragging_sprite_idx == i:
-                painter.setPen(QPen(QColor(255, 140, 0), 2))
-                painter.setBrush(Qt.BrushStyle.NoBrush)
-                painter.drawRect(rect)
-            elif self.hover_sprite_idx == i:
-                                                                            
-                                                                            
-                painter.setPen(QPen(QColor(255, 60, 60), 2, Qt.PenStyle.DashLine))
-                painter.setBrush(Qt.BrushStyle.NoBrush)
-                painter.drawRect(rect)
-                                                                            
-                                                                         
-                hint_text = "✕ удалить"
-                painter.setFont(QFont("Arial", 9, QFont.Weight.Bold))
-                text_w = painter.fontMetrics().horizontalAdvance(hint_text) + 12
-                hint_w = max(rect.width(), text_w)
-                hint_x = rect.x() + rect.width() // 2 - hint_w // 2
-                hint_y = max(0, rect.y() - 18)
-                hint_rect = QRect(hint_x, hint_y, hint_w, 16)
-                painter.fillRect(hint_rect, QColor(40, 0, 0, 200))
-                painter.setPen(QPen(QColor(255, 60, 60), 1))
-                painter.drawRect(hint_rect)
-                painter.setPen(QColor(255, 120, 120))
-                painter.drawText(hint_rect, Qt.AlignmentFlag.AlignCenter, hint_text)
+            self._paint_bg(painter)
+            self._paint_sprites(painter)
 
         if self.dialogue_text or self.char_name:
             if self.nvl_mode:

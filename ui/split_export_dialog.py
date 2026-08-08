@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 
 from core.split_export import split_project, SPLIT_RULES
+from core.i18n import tr
 
 
 class SplitExportDialog(QDialog):
@@ -22,7 +23,7 @@ class SplitExportDialog(QDialog):
         self.nvl_style = nvl_style
         self.target_dir = ""
         self._chunks = []
-        self.setWindowTitle("Экспорт в несколько файлов")
+        self.setWindowTitle(tr("split_export.title"))
         self.setMinimumSize(560, 520)
         self._setup_ui()
         self._update_preview()
@@ -30,12 +31,12 @@ class SplitExportDialog(QDialog):
     def _setup_ui(self):
         layout = QVBoxLayout(self)
 
-        rule_box = QGroupBox("Правило разбиения")
+        rule_box = QGroupBox(tr("split_export.rule_box"))
         rl = QVBoxLayout(rule_box)
         self.rule_group = QButtonGroup(self)
-        self.rb_label = QRadioButton("По меткам верхнего уровня (label) - ближе всего к главам/актам")
-        self.rb_scene = QRadioButton("По сценам редактора - один файл на каждую сцену")
-        self.rb_count = QRadioButton("Фиксированное число сцен на файл:")
+        self.rb_label = QRadioButton(tr("split_export.rb_label"))
+        self.rb_scene = QRadioButton(tr("split_export.rb_scene"))
+        self.rb_count = QRadioButton(tr("split_export.rb_count"))
         self.rb_label.setChecked(True)
         self.rule_group.addButton(self.rb_label, 0)
         self.rule_group.addButton(self.rb_scene, 1)
@@ -51,41 +52,35 @@ class SplitExportDialog(QDialog):
         self.count_spin.setValue(5)
         self.count_spin.valueChanged.connect(self._update_preview)
         count_row.addWidget(self.count_spin)
-        count_row.addWidget(QLabel("сцен/файл"))
+        count_row.addWidget(QLabel(tr("split_export.scenes_per_file")))
         count_row.addStretch()
         rl.addLayout(count_row)
         layout.addWidget(rule_box)
 
         dir_row = QHBoxLayout()
-        self.dir_lbl = QLabel("Папка не выбрана")
-        self.dir_lbl.setStyleSheet("color:#888;")
+        self.dir_lbl = QLabel(tr("split_export.dir_not_selected"))
+        self.dir_lbl.setObjectName("hint_text")
         dir_row.addWidget(self.dir_lbl, 1)
-        btn_dir = QPushButton("📁 Выбрать папку...")
+        btn_dir = QPushButton(tr("split_export.pick_dir"))
         btn_dir.clicked.connect(self._pick_dir)
         dir_row.addWidget(btn_dir)
         layout.addLayout(dir_row)
 
-        layout.addWidget(QLabel("Будет создано:"))
+        layout.addWidget(QLabel(tr("split_export.will_be_created")))
         self.preview_list = QListWidget()
         layout.addWidget(self.preview_list, 1)
 
-        note = QLabel(
-            "Все файлы вместе - это один сценарий: между ними расставляются "
-            "автоматические переходы (jump), так что смотреть его целиком "
-            "нужно как всегда, начиная с первого файла. Если какой-то файл в "
-            "папке уже существует и отличается - перед перезаписью будет "
-            "показан дифф (как при обычном экспорте)."
-        )
+        note = QLabel(tr("split_export.note"))
         note.setWordWrap(True)
-        note.setStyleSheet("color:#888; font-size:11px;")
+        note.setObjectName("hint_text")
         layout.addWidget(note)
 
         btn_row = QHBoxLayout()
         btn_row.addStretch()
-        btn_cancel = QPushButton("Отмена")
+        btn_cancel = QPushButton(tr("split_export.cancel"))
         btn_cancel.clicked.connect(self.reject)
         btn_row.addWidget(btn_cancel)
-        self.btn_export = QPushButton("Экспортировать")
+        self.btn_export = QPushButton(tr("split_export.export"))
         self.btn_export.setObjectName("btn_primary")
         self.btn_export.setEnabled(False)
         self.btn_export.clicked.connect(self._do_export)
@@ -111,7 +106,7 @@ class SplitExportDialog(QDialog):
         except Exception as e:
             self._chunks = []
             self.btn_export.setEnabled(False)
-            self.preview_list.addItem(f"Ошибка: {e}")
+            self.preview_list.addItem(tr("split_export.error_prefix", error=e))
             return
         self._chunks = chunks
         for c in chunks:
@@ -121,11 +116,11 @@ class SplitExportDialog(QDialog):
         self.btn_export.setEnabled(bool(chunks) and bool(self.target_dir))
 
     def _pick_dir(self):
-        d = QFileDialog.getExistingDirectory(self, "Папка для экспорта")
+        d = QFileDialog.getExistingDirectory(self, tr("split_export.pick_dir_title"))
         if d:
             self.target_dir = d
             self.dir_lbl.setText(d)
-            self.dir_lbl.setStyleSheet("color:#ccc;")
+            self.dir_lbl.setObjectName("hint_text_bright")
             self.btn_export.setEnabled(bool(self._chunks))
 
     def _do_export(self):
@@ -155,11 +150,11 @@ class SplitExportDialog(QDialog):
                     f.write(code)
                 written.append(path)
             except Exception as e:
-                QMessageBox.critical(self, "Ошибка записи", f"{chunk.filename}: {e}")
+                QMessageBox.critical(self, tr("split_export.write_error_title"), f"{chunk.filename}: {e}")
                 skipped.append(chunk.filename)
 
-        msg = f"Записано файлов: {len(written)}."
+        msg = tr("split_export.written_count", count=len(written))
         if skipped:
-            msg += f"\nПропущено: {len(skipped)} ({', '.join(skipped)})"
-        QMessageBox.information(self, "Экспорт завершён", msg)
+            msg += tr("split_export.skipped", count=len(skipped), names=", ".join(skipped))
+        QMessageBox.information(self, tr("split_export.done_title"), msg)
         self.accept()

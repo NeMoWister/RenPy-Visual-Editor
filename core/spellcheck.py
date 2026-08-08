@@ -35,6 +35,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set, Tuple
 
 from core.renpy_text_tags import strip_tags
+from core.i18n import tr
 
 try:
     from spellchecker import SpellChecker as _PySpellChecker                     
@@ -131,20 +132,22 @@ def _get_morph():
 
 
 def _is_known_ru(word_lower: str) -> bool:
-    """True, если pymorphy3 нашёл для словоформы разбор со словарным словом
-    (не эвристический разбор незнакомого слова). pymorphy3 всегда возвращает
-    хотя бы один Parse даже для полной тарабарщины (тег содержит UNKN и
-    score близок к нулю) - отсекаем именно такие случаи."""
+    """True, только если word_lower реально есть в словаре pymorphy3.
+
+    Раньше здесь проверялся best.tag на 'UNKN' и score первого разбора.
+    Это не работало: у pymorphy3 есть встроенный морфологический
+    "угадыватель" (guesser), который для НЕИЗВЕСТНЫХ слов по одному
+    окончанию подбирает похожую словоформу и возвращает разбор БЕЗ метки
+    UNKN и с высоким score (например "призентация" -> NOUN,femn sing,nomn,
+    score=1.0). Из-за этого опечатки вида "призентация", "автомабиль"
+    считались нормальными словами, и проверка орфографии их не находила.
+
+    word_is_known() проверяет слово именно по словарю, без угадывания -
+    это и есть корректный критерий "известно/неизвестно"."""
     morph = _get_morph()
     if morph is None:
-        return True                                                      
-    parses = morph.parse(word_lower)
-    if not parses:
-        return False
-    best = parses[0]
-    if 'UNKN' in best.tag:
-        return False
-    return best.score >= 0.15
+        return True
+    return morph.word_is_known(word_lower)
 
 
 def _get_checker(lang: str):
@@ -183,29 +186,29 @@ def _check_tags(raw: str) -> List[SpellIssue]:
             if stack and stack[-1][0] == name:
                 stack.pop()
             else:
-                issues.append(SpellIssue('tag', f'Непарный закрывающий тег {{/{name}}}', m.start(), m.end()))
+                issues.append(SpellIssue('tag', tr('spell.unpaired_closing_tag', name=name), m.start(), m.end()))
     for name, s, e in stack:
-        issues.append(SpellIssue('tag', f'Незакрытый тег {{{name}}} - нет {{/{name}}}', s, e))
+        issues.append(SpellIssue('tag', tr('spell.unclosed_tag', name=name), s, e))
     return issues
 
 
 def _check_punctuation(clean: str) -> List[SpellIssue]:
     issues = []
     for m in re.finditer(r'  +', clean):
-        issues.append(SpellIssue('punctuation', 'Двойной пробел', m.start(), m.end()))
+        issues.append(SpellIssue('punctuation', tr('spell.double_space'), m.start(), m.end()))
     for m in re.finditer(r' +([,.!?;:])', clean):
-        issues.append(SpellIssue('punctuation', f'Пробел перед «{m.group(1)}»', m.start(), m.end()))
+        issues.append(SpellIssue('punctuation', tr('spell.space_before_punct', ch=m.group(1)), m.start(), m.end()))
     for m in re.finditer(r'[,.!?;:]{2,}', clean):
         seg = m.group(0)
         if seg not in _ALLOWED_PUNCT_RUNS:
-            issues.append(SpellIssue('punctuation', f'Повтор знаков препинания: «{seg}»', m.start(), m.end()))
+            issues.append(SpellIssue('punctuation', tr('spell.repeated_punct', seg=seg), m.start(), m.end()))
     return issues
 
 
 def _check_repeats(clean: str) -> List[SpellIssue]:
     issues = []
     for m in re.finditer(r'\b(\w+)\s+\1\b', clean, re.IGNORECASE | re.UNICODE):
-        issues.append(SpellIssue('repeat', f'Повтор слова подряд: «{m.group(1)}»', m.start(), m.end()))
+        issues.append(SpellIssue('repeat', tr('spell.repeated_word', word=m.group(1)), m.start(), m.end()))
     return issues
 
 
@@ -279,7 +282,7 @@ def _check_spelling(clean: str, lang: Optional[str] = None,
         is_unknown, suggestions = _lookup_word(checker, lang, word_lower, use_morph)
         if not is_unknown:
             continue
-        issues.append(SpellIssue('spelling', f'Возможно, опечатка: «{word}»',
+        issues.append(SpellIssue('spelling', tr('spell.possible_typo', word=word),
                                   m.start(), m.end(), list(suggestions), word=word))
     return issues
 

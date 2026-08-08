@@ -16,6 +16,8 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtGui import QTextCharFormat, QColor, QFont
 
+from core.i18n import tr
+
 
 class HunkMergeDialog(QDialog):
     """Построчный merge: каждый хунк (блок различий) можно принять
@@ -24,8 +26,10 @@ class HunkMergeDialog(QDialog):
 
     def __init__(self, old_text: str, new_text: str, target_path: str, parent=None):
         super().__init__(parent)
-        self.setWindowTitle(f"Построчный merge - {os.path.basename(target_path)}")
+        self.setWindowTitle(tr("diff.merge_title", name=os.path.basename(target_path)))
         self.setMinimumSize(920, 650)
+        from ui.theme import fit_window_to_screen
+        fit_window_to_screen(self, 920, 650, min_w=760, min_h=520)
         self.accepted_merge = False
         self.merged_text = new_text
 
@@ -36,13 +40,10 @@ class HunkMergeDialog(QDialog):
         self._hunk_choices = {}                                     
 
         layout = QVBoxLayout(self)
-        info = QLabel(
-            "Для каждого отличающегося куска выберите: оставить версию из файла на "
-            "диске (ваши ручные правки) или принять версию, которую сгенерировал "
-            "редактор. Одинаковые участки merge не трогает."
-        )
+        info = QLabel(tr("diff.merge_info"))
         info.setWordWrap(True)
-        info.setStyleSheet("color:#9fd6ff; background:#152233; padding:6px; border-radius:4px;")
+        info.setObjectName("info_banner")
+        info.setStyleSheet("padding:6px;")
         layout.addWidget(info)
 
         scroll = QScrollArea()
@@ -61,19 +62,20 @@ class HunkMergeDialog(QDialog):
                     ctx = QLabel("\n".join(self.old_lines[i1:i2][:4]) +
                                  ("\n…" if i2 - i1 > 4 else ""))
                     ctx.setFont(mono)
-                    ctx.setStyleSheet("color:#666; padding:2px 6px;")
+                    ctx.setObjectName("hint_text")
+                    ctx.setStyleSheet("padding:2px 6px;")
                     self._content_layout.addWidget(ctx)
                 continue
 
             n_hunks += 1
             box = QFrame()
-            box.setStyleSheet("QFrame { background:#20202a; border-radius:6px; }")
+            box.setObjectName("surface_frame")
             box_l = QVBoxLayout(box)
 
             group = QButtonGroup(box)
             row = QHBoxLayout()
-            rb_new = QRadioButton("✅ Принять новую версию")
-            rb_old = QRadioButton("↩ Оставить как в файле")
+            rb_new = QRadioButton(tr("diff.accept_new"))
+            rb_old = QRadioButton(tr("diff.keep_old"))
             rb_new.setChecked(True)                                             
             group.addButton(rb_new, 1)
             group.addButton(rb_old, 0)
@@ -82,16 +84,16 @@ class HunkMergeDialog(QDialog):
             row.addStretch()
             box_l.addLayout(row)
 
-            old_block = "\n".join(self.old_lines[i1:i2]) if i2 > i1 else "(строк не было)"
-            new_block = "\n".join(self.new_lines[j1:j2]) if j2 > j1 else "(строки удаляются)"
+            old_block = "\n".join(self.old_lines[i1:i2]) if i2 > i1 else tr("diff.no_lines")
+            new_block = "\n".join(self.new_lines[j1:j2]) if j2 > j1 else tr("diff.lines_removed")
 
             old_view = QTextEdit(old_block)
             old_view.setReadOnly(True)
             old_view.setFont(mono)
             old_view.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
             self._size_hunk_view(old_view, max(1, i2 - i1))
-            old_view.setStyleSheet("background:#241717; color:#ff9a9a;")
-            box_l.addWidget(QLabel("Из файла на диске:"))
+            old_view.setObjectName("danger_banner")
+            box_l.addWidget(QLabel(tr("diff.from_disk")))
             box_l.addWidget(old_view)
 
             new_view = QTextEdit(new_block)
@@ -99,22 +101,22 @@ class HunkMergeDialog(QDialog):
             new_view.setFont(mono)
             new_view.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
             self._size_hunk_view(new_view, max(1, j2 - j1))
-            new_view.setStyleSheet("background:#17241a; color:#9af0a8;")
-            box_l.addWidget(QLabel("Сгенерировано редактором:"))
+            new_view.setObjectName("success_banner")
+            box_l.addWidget(QLabel(tr("diff.generated_by_editor")))
             box_l.addWidget(new_view)
 
             self._hunk_choices[idx] = group
             self._content_layout.addWidget(box)
 
         if n_hunks == 0:
-            self._content_layout.addWidget(QLabel("Файлы построчно идентичны - merge не нужен."))
+            self._content_layout.addWidget(QLabel(tr("diff.identical_no_merge")))
 
         btn_row = QHBoxLayout()
         btn_row.addStretch()
-        btn_cancel = QPushButton("Отмена")
+        btn_cancel = QPushButton(tr("diff.cancel"))
         btn_cancel.clicked.connect(self.reject)
         btn_row.addWidget(btn_cancel)
-        btn_apply = QPushButton(f"Применить merge ({n_hunks} хунков)")
+        btn_apply = QPushButton(tr("diff.apply_merge", count=n_hunks))
         btn_apply.setObjectName("btn_primary")
         btn_apply.setEnabled(n_hunks > 0)
         btn_apply.clicked.connect(self._apply_merge)
@@ -163,7 +165,7 @@ class DiffPreviewDialog(QDialog):
         self.action = None
         self.copy_path = None
         self.merged_text = None
-        self.setWindowTitle(f"Проверка изменений - {os.path.basename(target_path)}")
+        self.setWindowTitle(tr("diff.preview_title", name=os.path.basename(target_path)))
         self.setMinimumSize(880, 620)
         self._old_text = old_text
         self._new_text = new_text
@@ -172,41 +174,37 @@ class DiffPreviewDialog(QDialog):
     def _setup_ui(self, old_text: str, new_text: str):
         layout = QVBoxLayout(self)
 
-        info = QLabel(
-            f"Файл «{self.target_path}» уже существует и отличается от того, что "
-            f"сгенерирует редактор. Если в нём есть ручные правки, сделанные мимо "
-            f"редактора (например, напрямую в Ren'Py) - они будут потеряны при "
-            f"перезаписи. Красным - что удалится, зелёным - что добавится."
-        )
+        info = QLabel(tr("diff.overwrite_warning", path=self.target_path))
         info.setWordWrap(True)
-        info.setStyleSheet("color:#ffb84d; background:#332a1a; padding:6px; border-radius:4px;")
+        info.setObjectName("warning_banner")
+        info.setStyleSheet("padding:6px;")
         layout.addWidget(info)
 
         self.diff_view = QTextEdit()
         self.diff_view.setReadOnly(True)
         self.diff_view.setFont(QFont("Consolas", 10))
-        self.diff_view.setStyleSheet("background:#1a1a21; color:#ccc;")
+        self.diff_view.setObjectName("code_box")
         layout.addWidget(self.diff_view, 1)
 
         self._render_diff(old_text, new_text)
 
         stats = self._diff_stats(old_text, new_text)
         stats_lbl = QLabel(stats)
-        stats_lbl.setStyleSheet("color:#888; font-size:11px;")
+        stats_lbl.setObjectName("hint_text")
         layout.addWidget(stats_lbl)
 
         btn_row = QHBoxLayout()
         btn_row.addStretch()
-        btn_cancel = QPushButton("Отмена")
+        btn_cancel = QPushButton(tr("diff.cancel"))
         btn_cancel.clicked.connect(self._on_cancel)
         btn_row.addWidget(btn_cancel)
-        btn_copy = QPushButton("💾 Сохранить копию рядом")
+        btn_copy = QPushButton(tr("diff.save_copy"))
         btn_copy.clicked.connect(self._on_save_copy)
         btn_row.addWidget(btn_copy)
-        btn_merge = QPushButton("🔀 Построчный merge...")
+        btn_merge = QPushButton(tr("diff.merge_button"))
         btn_merge.clicked.connect(self._on_merge)
         btn_row.addWidget(btn_merge)
-        btn_overwrite = QPushButton("⚠ Перезаписать существующий файл")
+        btn_overwrite = QPushButton(tr("diff.overwrite_button"))
         btn_overwrite.setObjectName("btn_primary")
         btn_overwrite.clicked.connect(self._on_overwrite)
         btn_row.addWidget(btn_overwrite)
@@ -225,13 +223,13 @@ class DiffPreviewDialog(QDialog):
                 removed += i2 - i1
             elif tag == "insert":
                 added += j2 - j1
-        return f"Добавлено строк: {added}   •   Удалено строк: {removed}"
+        return tr("diff.stats", added=added, removed=removed)
 
     def _render_diff(self, old_text: str, new_text: str):
         old_lines = old_text.splitlines()
         new_lines = new_text.splitlines()
         diff = difflib.unified_diff(old_lines, new_lines, lineterm="",
-                                     fromfile="текущий файл на диске", tofile="то, что сгенерирует редактор")
+                                     fromfile=tr("diff.fromfile_label"), tofile=tr("diff.tofile_label"))
 
         cursor = self.diff_view.textCursor()
         fmt_add = QTextCharFormat()
@@ -256,7 +254,7 @@ class DiffPreviewDialog(QDialog):
                 cursor.insertText(line + "\n", fmt_default)
 
         if not any_lines:
-            cursor.insertText("(файлы идентичны построчно)", fmt_default)
+            cursor.insertText(tr("diff.identical_lines"), fmt_default)
 
     def _on_cancel(self):
         self.action = None
@@ -270,8 +268,8 @@ class DiffPreviewDialog(QDialog):
         base, ext = os.path.splitext(self.target_path)
         suggested = f"{base}_new{ext}"
         path, _ = QFileDialog.getSaveFileName(
-            self, "Сохранить копию рядом", suggested,
-            "Ren'Py Script (*.rpy);;Все файлы (*)"
+            self, tr("diff.save_copy_title"), suggested,
+            f"Ren'Py Script (*.rpy);;{tr('diff.all_files')} (*)"
         )
         if not path:
             return
