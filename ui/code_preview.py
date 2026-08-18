@@ -1,107 +1,107 @@
-                       
-from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QPushButton,
-    QPlainTextEdit, QFileDialog, QMessageBox, QTabWidget, QLabel, QSlider
+
+from PyQt6 .QtWidgets import (
+QDialog ,QVBoxLayout ,QHBoxLayout ,QPushButton ,
+QPlainTextEdit ,QFileDialog ,QMessageBox ,QTabWidget ,QLabel ,QSlider 
 )
-from PyQt6.QtGui import QFont, QSyntaxHighlighter, QTextCharFormat, QColor
-from PyQt6.QtCore import QRegularExpression, Qt
+from PyQt6 .QtGui import QFont ,QSyntaxHighlighter ,QTextCharFormat ,QColor 
+from PyQt6 .QtCore import QRegularExpression ,Qt 
 
-from core.i18n import tr
+from core .i18n import tr 
 
 
-class RenPyHighlighter(QSyntaxHighlighter):
-    def __init__(self, document):
-        super().__init__(document)
-        self.rules = []
-        def add(pattern, color, bold=False, italic=False):
-            fmt = QTextCharFormat()
-            fmt.setForeground(QColor(color))
-            if bold: fmt.setFontWeight(700)
-            if italic: fmt.setFontItalic(True)
-            self.rules.append((QRegularExpression(pattern), fmt))
+class RenPyHighlighter (QSyntaxHighlighter ):
+    def __init__ (self ,document ):
+        super ().__init__ (document )
+        self .rules =[]
+        def add (pattern ,color ,bold =False ,italic =False ):
+            fmt =QTextCharFormat ()
+            fmt .setForeground (QColor (color ))
+            if bold :fmt .setFontWeight (700 )
+            if italic :fmt .setFontItalic (True )
+            self .rules .append ((QRegularExpression (pattern ),fmt ))
         for kw in ["label","scene","show","hide","play","stop","pause","jump","menu",
-                   "python","define","image","with","music","sound","dissolve","fade","return","call"]:
-            add(rf'\b{kw}\b', "#ff8c3d", bold=True)
-        add(r'"[^"]*"', "#98c379")
-        add(r'#.*$', "#5c6370", italic=True)
-        add(r'\b\d+\.?\d*\b', "#d19a66")
-        add(r'^\s*\$.*$', "#c678dd")
-        add(r'(?<=label )\w+', "#61afef", bold=True)
-        add(r'(?<=jump )\w+', "#61afef")
+        "python","define","image","with","music","sound","dissolve","fade","return","call"]:
+            add (rf'\b{kw }\b',"#ff8c3d",bold =True )
+        add (r'"[^"]*"',"#98c379")
+        add (r'#.*$',"#5c6370",italic =True )
+        add (r'\b\d+\.?\d*\b',"#d19a66")
+        add (r'^\s*\$.*$',"#c678dd")
+        add (r'(?<=label )\w+',"#61afef",bold =True )
+        add (r'(?<=jump )\w+',"#61afef")
 
-    def highlightBlock(self, text):
-        for pattern, fmt in self.rules:
-            it = pattern.globalMatch(text)
-            while it.hasNext():
-                m = it.next()
-                self.setFormat(m.capturedStart(), m.capturedLength(), fmt)
+    def highlightBlock (self ,text ):
+        for pattern ,fmt in self .rules :
+            it =pattern .globalMatch (text )
+            while it .hasNext ():
+                m =it .next ()
+                self .setFormat (m .capturedStart (),m .capturedLength (),fmt )
 
 
-class CodePreviewDialog(QDialog):
-    def __init__(self, full_code: str, defines_code: str = "", parent=None):
-        super().__init__(parent)
-        self.setWindowTitle(tr("code_preview.title"))
-        self.setMinimumSize(800, 600)
-        layout = QVBoxLayout(self)
+class CodePreviewDialog (QDialog ):
+    def __init__ (self ,full_code :str ,defines_code :str ="",parent =None ):
+        super ().__init__ (parent )
+        self .setWindowTitle (tr ("code_preview.title"))
+        self .setMinimumSize (800 ,600 )
+        layout =QVBoxLayout (self )
 
-        font_row = QHBoxLayout()
-        font_row.addWidget(QLabel(tr("code_preview.font_size")))
-        self.font_slider = QSlider(Qt.Orientation.Horizontal)
-        self.font_slider.setRange(8, 24)
-        self.font_slider.setValue(11)
-        self.font_slider.setFixedWidth(140)
-        self.font_slider.valueChanged.connect(self._on_font_size_changed)
-        font_row.addWidget(self.font_slider)
-        self.font_size_lbl = QLabel("11")
-        self.font_size_lbl.setFixedWidth(24)
-        font_row.addWidget(self.font_size_lbl)
-        font_row.addStretch()
-        layout.addLayout(font_row)
+        font_row =QHBoxLayout ()
+        font_row .addWidget (QLabel (tr ("code_preview.font_size")))
+        self .font_slider =QSlider (Qt .Orientation .Horizontal )
+        self .font_slider .setRange (8 ,24 )
+        self .font_slider .setValue (11 )
+        self .font_slider .setFixedWidth (140 )
+        self .font_slider .valueChanged .connect (self ._on_font_size_changed )
+        font_row .addWidget (self .font_slider )
+        self .font_size_lbl =QLabel ("11")
+        self .font_size_lbl .setFixedWidth (24 )
+        font_row .addWidget (self .font_size_lbl )
+        font_row .addStretch ()
+        layout .addLayout (font_row )
 
-        tabs = QTabWidget()
-        self.full_editor = QPlainTextEdit()
-        self.full_editor.setFont(QFont("Courier New", 11))
-        self.full_editor.setPlainText(full_code)
-        RenPyHighlighter(self.full_editor.document())
-        tabs.addTab(self.full_editor, tr("code_preview.tab_full"))
-        if defines_code:
-            self.def_editor = QPlainTextEdit()
-            self.def_editor.setFont(QFont("Courier New", 11))
-            self.def_editor.setPlainText(defines_code)
-            RenPyHighlighter(self.def_editor.document())
-            tabs.addTab(self.def_editor, tr("code_preview.tab_defines"))
-        layout.addWidget(tabs)
-        btn_row = QHBoxLayout()
-        btn_copy = QPushButton(tr("code_preview.copy"))
-        btn_copy.clicked.connect(self._copy)
-        btn_save = QPushButton(tr("code_preview.save"))
-        btn_save.clicked.connect(self._save)
-        btn_close = QPushButton(tr("code_preview.close"))
-        btn_close.setObjectName("btn_secondary")
-        btn_close.clicked.connect(self.accept)
-        btn_row.addWidget(btn_copy)
-        btn_row.addWidget(btn_save)
-        btn_row.addStretch()
-        btn_row.addWidget(btn_close)
-        layout.addLayout(btn_row)
+        tabs =QTabWidget ()
+        self .full_editor =QPlainTextEdit ()
+        self .full_editor .setFont (QFont ("Courier New",11 ))
+        self .full_editor .setPlainText (full_code )
+        RenPyHighlighter (self .full_editor .document ())
+        tabs .addTab (self .full_editor ,tr ("code_preview.tab_full"))
+        if defines_code :
+            self .def_editor =QPlainTextEdit ()
+            self .def_editor .setFont (QFont ("Courier New",11 ))
+            self .def_editor .setPlainText (defines_code )
+            RenPyHighlighter (self .def_editor .document ())
+            tabs .addTab (self .def_editor ,tr ("code_preview.tab_defines"))
+        layout .addWidget (tabs )
+        btn_row =QHBoxLayout ()
+        btn_copy =QPushButton (tr ("code_preview.copy"))
+        btn_copy .clicked .connect (self ._copy )
+        btn_save =QPushButton (tr ("code_preview.save"))
+        btn_save .clicked .connect (self ._save )
+        btn_close =QPushButton (tr ("code_preview.close"))
+        btn_close .setObjectName ("btn_secondary")
+        btn_close .clicked .connect (self .accept )
+        btn_row .addWidget (btn_copy )
+        btn_row .addWidget (btn_save )
+        btn_row .addStretch ()
+        btn_row .addWidget (btn_close )
+        layout .addLayout (btn_row )
 
-    def _on_font_size_changed(self, value: int):
-        self.font_size_lbl.setText(str(value))
-        self.full_editor.setFont(QFont("Courier New", value))
-        if hasattr(self, "def_editor"):
-            self.def_editor.setFont(QFont("Courier New", value))
+    def _on_font_size_changed (self ,value :int ):
+        self .font_size_lbl .setText (str (value ))
+        self .full_editor .setFont (QFont ("Courier New",value ))
+        if hasattr (self ,"def_editor"):
+            self .def_editor .setFont (QFont ("Courier New",value ))
 
-    def _copy(self):
-        from PyQt6.QtWidgets import QApplication
-        QApplication.clipboard().setText(self.full_editor.toPlainText())
-        QMessageBox.information(self, tr("code_preview.copied_title"), tr("code_preview.copied_text"))
+    def _copy (self ):
+        from PyQt6 .QtWidgets import QApplication 
+        QApplication .clipboard ().setText (self .full_editor .toPlainText ())
+        QMessageBox .information (self ,tr ("code_preview.copied_title"),tr ("code_preview.copied_text"))
 
-    def _save(self):
-        path, _ = QFileDialog.getSaveFileName(self, tr("code_preview.save_dialog_title"), "script.rpy", f"Ren'Py Script (*.rpy);;{tr('code_preview.all_files')} (*)")
-        if path:
-            try:
-                with open(path, 'w', encoding='utf-8') as f:
-                    f.write(self.full_editor.toPlainText())
-                QMessageBox.information(self, tr("code_preview.done_title"), tr("code_preview.saved_text", path=path))
-            except Exception as e:
-                QMessageBox.critical(self, tr("code_preview.error_title"), str(e))
+    def _save (self ):
+        path ,_ =QFileDialog .getSaveFileName (self ,tr ("code_preview.save_dialog_title"),"script.rpy",f"Ren'Py Script (*.rpy);;{tr ('code_preview.all_files')} (*)")
+        if path :
+            try :
+                with open (path ,'w',encoding ='utf-8')as f :
+                    f .write (self .full_editor .toPlainText ())
+                QMessageBox .information (self ,tr ("code_preview.done_title"),tr ("code_preview.saved_text",path =path ))
+            except Exception as e :
+                QMessageBox .critical (self ,tr ("code_preview.error_title"),str (e ))
