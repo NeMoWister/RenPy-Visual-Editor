@@ -117,7 +117,7 @@ Assets in `default/` are usable in the editor but **not exported** in `define`/`
 
 ## 4. Composite sprites (sprites.rpy) 🧩
 
-If a **sprites.rpy** file exists inside `resources/*/sprites/`, the editor automatically parses `ConditionSwitch` and `im.Composite` declarations and composites layers for the preview.
+If a **sprites.rpy** file exists inside `resources/*/sprites/`, the editor parses character declarations from it and builds the sprite picker carousel from them. This is the **only** source of composite sprites: there is no automatic declaration or assembly from folder structure anymore (no `layeredimage`, no guessing from nested subfolders) - if a character isn't in `sprites.rpy`, it simply won't appear as a composite sprite in the editor, and its files (if any) stay as plain flat resources (see "Show sprite → Plain sprites").
 
 **Parsing example:**
 ```renpy
@@ -130,16 +130,49 @@ image cs normal stethoscope far = ConditionSwitch(
 )
 ```
 
-**In the editor:**
-- Character → Distance (far / close / normal) → Emotion
-- Layers are composited automatically in the preview
-- Conditional tinting (`im.matrix.tint`) is ignored in preview
+The parser also understands a simpler, single-line form (no `ConditionSwitch`/`im.MatrixColor`):
+```renpy
+image mt grin panama pioneer far = im.Composite((630,1080), (0,0), "sprites/far/mt/mt_3_body.png", (0,0), "sprites/far/mt/mt_3_panama.png", (0,0), "sprites/far/mt/mt_3_grin.png", (0,0), "sprites/far/mt/mt_3_pioneer.png")
+```
+Whatever the block looks like, only the final `im.Composite(...)` layer stack is extracted; conditional logic and tinting (`im.matrix.tint`, `AlphaMask`, etc.) are ignored while parsing - the editor only cares about the final composited layers.
 
-**Hiding:** use `hide cs`, not the full emotion name.
+### Sprite name: character, attributes, position
+
+The name after `image` is parsed as follows:
+- the **first word** is the character (`cs`, `mt`, `dv`...);
+- the **last word**, if it's `far`/`close`/`normal`, is the position (shot distance); if there's no such word, the position defaults to `normal`;
+- everything left in between is the **attributes** (there can be several).
+
+### Attributes are independent groups, not one flat list
+
+In `image cs normal stethoscope far`, `normal` and `stethoscope` are **two different, independently selectable attributes** (e.g. "facial expression" and "extra item"), not two variants of the same thing. The editor shows them separately - each word position in the name becomes its own row of attribute cards (like groups in a regular `layeredimage`, except they're inferred from the actual `sprites.rpy` declarations instead of being declared explicitly). Each attribute card shows the **entire** composited sprite (not just the single layer that changes).
+
+Selecting multiple attributes looks for an **exact match** among the combinations actually declared in `sprites.rpy` - no non-existent layer combination is ever guessed or assembled on the fly.
+
+### Optional accessory attributes (panama, glasses, etc.)
+
+Sometimes some of a character's sprites have an extra, optional accessory inserted in the MIDDLE of the name (e.g. `mt grin panama pioneer far`, where normally there are only two attributes: emotion and clothing). Such a word would break the usual positional attribute grouping - it's split into its own optional group in two ways:
+
+1. **Automatically** - if a word only occurs in combinations longer than the character's typical length, and never appears in a combination of the typical length, it's treated as an optional accessory.
+2. **Via a hint** - an **`exceptions.txt`** file placed next to `sprites.rpy` (in the same `sprites/` folder). Format - one entry per line:
+   ```
+   # character: words that should always become a separate optional attribute
+   mt: panama
+   mz: glasses, sunglasses
+   ```
+   The separator after the character name is `:` (or just a space); words are separated by commas and/or spaces. Empty lines and lines starting with `#` are ignored.
+
+Such an optional group is labeled in the UI as "Attribute N (optional)" - it can be left unselected.
+
+### Compatible attribute highlighting
+
+When an attribute is selected in one group (e.g. "dress"), attributes in other groups for which no declared sprite exists paired with the current selection (e.g. "smile", if only "smile + pioneer" exists and not "smile + dress") are visually dimmed - so you can immediately see which combinations actually exist in `sprites.rpy` without trial and error.
+
+**Hiding:** `hide cs` is enough, not the full name with all attributes.
 
 ![Composite sprite picker](images/select_sprite.png)
 
-> 🖼️ *Screenshot: sprite carousel. Character folders → distance → emotion with composited preview.*
+> 🖼️ *Screenshot: sprite carousel. Characters → position (if more than one) → rows of attribute cards with a full-sprite preview.*
 
 ---
 
@@ -321,6 +354,38 @@ A: If `X` isn't found in resources, the code is preserved verbatim. Make sure th
 ---
 
 ## 13. How it works: features by version 🧭
+
+### v1.5.2
+
+- **sprites.rpy: composite sprite logic fully reworked** - removed
+  `layeredimage` support (both reading it from files and auto-generating
+  it) and removed auto-generation of composite sprites from folder
+  structure for undeclared characters: the only source now is
+  `sprites.rpy` - if it's missing, a character simply won't appear as a
+  composite sprite (its files stay as plain flat resources).
+- **Attributes are independent groups, not one flat list** - in a name
+  like `image cs normal stethoscope far`, the words `normal` and
+  `stethoscope` are now shown as two different, independently selectable
+  attributes (like groups in a regular `layeredimage`), instead of being
+  lumped into one pile. Each attribute card now previews the ENTIRE
+  composited sprite, not just the single layer that differs.
+- **Optional accessory attributes and `exceptions.txt`** - an extra
+  accessory inserted in the middle of a name (e.g. `panama` in
+  `mt grin panama pioneer far`) is now either auto-detected (by an
+  atypical name length) or explicitly listed in an `exceptions.txt` file
+  next to `sprites.rpy` - and split into its own optional attribute
+  group, without breaking the positional grouping of the rest.
+- **Compatible attribute highlighting** - selecting an attribute in one
+  group visually dims incompatible options in other groups (ones with no
+  actually declared combination).
+- **Resource carousel width fixes** - the carousel no longer takes up
+  more width than its content needs when there are few files/folders
+  (e.g. a single character folder), while still filling the full
+  available width when there are many items.
+- **"Project" menu icon alignment** - icons for "Presentation Mode",
+  "Timing Check" and "Spellcheck Lines" moved into the reserved icon area
+  to the left of the label (like the rest of the menu), instead of being
+  baked into the label text itself.
 
 ### v1.5.0
 
@@ -522,6 +587,16 @@ A: If `X` isn't found in resources, the code is preserved verbatim. Make sure th
 
 ## 14. Version history 📜
 
+### v1.5.2
+- Reworked composite sprite logic: removed `layeredimage` and folder-based
+  auto-generation, the only source is now `sprites.rpy`
+- Composite sprite attributes are independent groups instead of one flat
+  list; card preview shows the entire sprite
+- Optional accessory attributes (auto-detected + `exceptions.txt`)
+- Compatible attribute highlighting
+- Resource carousel width fixes
+- "Project" menu icon alignment
+
 ### v1.5.0
 - ATL transform parsing
 - ATL animation emulation in preview (including `repeat`)
@@ -594,4 +669,4 @@ A: If `X` isn't found in resources, the code is preserved verbatim. Make sure th
 
 ---
 
-*Documentation is current for version 1.5.0.*
+*Documentation is current for version 1.5.2.*
