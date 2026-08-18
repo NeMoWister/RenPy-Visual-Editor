@@ -401,11 +401,6 @@ class PresentationCanvas(QWidget):
         doc.setDefaultFont(QFont("Arial", base_font_px))
         doc.setTextWidth(w - 2 * pad)
         doc.setHtml(f'<div style="color:#e6e6e6;">{html}</div>')
-
-                                                                          
-                                                                      
-                                                                         
-                                                                          
         text_area_h = max(int(doc.size().height()), 1)
         box_h = min(max_box_h, max(min_box_h, text_area_h + int(min_box_h * 0.25)))
         box_y = h - box_h - int(h * 0.03)
@@ -458,13 +453,6 @@ class PresentationCanvas(QWidget):
         visible_runs = truncate_runs(self._runs, self._reveal_count) if self._runs else []
         if visible_runs or self.char_name:
             html_parts.append(self._nvl_line_html(self.char_name, visible_runs, self.char_color, dim=False, base_size=base_font_px))
-
-                                                                         
-                                                                           
-                                                                            
-                                                                            
-                                                                           
-                                                                     
         panel_h = int(h * 0.88)
         doc = None
         if html_parts:
@@ -490,10 +478,6 @@ class PresentationCanvas(QWidget):
         prefix_html = ""
         if char_name:
             c = QColor(color) if color and QColor(color).isValid() else QColor(255, 255, 255)
-                                                                           
-                                                                          
-                                                                         
-                                            
             prefix_html = f'<b style="color:{c.name()}; font-size:{base_size}px;">{char_name}:</b>&nbsp;'
         body_html = runs_to_html(runs, base_size=base_size) if runs else ""
         text_color = "#8d8d92" if dim else "#e9e9ee"
@@ -591,9 +575,6 @@ class PresentationWindow(QWidget):
         self._pending_choice_positions: List[Optional[Position]] = []
                                                                      
         self.label_trail: List[str] = []
-                                                                              
-                                                                          
-                                                                              
         self._line_history: List[Position] = []
         self._speed_presets = [0.5, 1.0, 1.5, 2.0, 3.0]
         self._speed_idx = 1                    
@@ -689,7 +670,6 @@ class PresentationWindow(QWidget):
         bar.adjustSize()
         self._toolbar = bar
 
-                                                    
         crumbs = QWidget(self)
         crumbs.setStyleSheet("background: rgba(15,15,20,150); border-radius: 6px;")
         cl = QHBoxLayout(crumbs)

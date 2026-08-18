@@ -32,9 +32,7 @@ from core.translations import TRANSLATIONS
 
 DEFAULT_LANGUAGE = "ru"
 FALLBACK_LANGUAGE = "ru"
-
-                                                             
-                                                                    
+                                             
                                                              
 LANGUAGE_NAMES = {
     "ru": "Русский",
@@ -79,9 +77,7 @@ class Translator:
             except (KeyError, IndexError):
                 return text
         return text
-
-
-                                                                        
+                                       
 _translator = Translator()
 
 

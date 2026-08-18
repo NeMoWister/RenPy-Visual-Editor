@@ -54,12 +54,7 @@ class TransitionSpec:
             return max(0.01, self.fade_out + self.fade_hold + self.fade_in)
         if self.kind == TransitionKind.PUNCH:
             return 0.4                                                       
-        return max(0.01, self.duration)
-
-
-                                                                              
-                                                            
-                                                                              
+        return max(0.01, self.duration)                  
 
 def _dissolve(duration: float) -> TransitionSpec:
     return TransitionSpec(kind=TransitionKind.DISSOLVE, duration=duration)
@@ -86,10 +81,6 @@ def _punch(axis: str) -> TransitionSpec:
     return TransitionSpec(kind=TransitionKind.PUNCH, punch_axis=axis)
 
 
-                                                                              
-                                                                          
-                                                                              
-
 BUILTIN_TRANSITIONS: Dict[str, TransitionSpec] = {
     "dissolve": _dissolve(0.5),
     "dissolve2": _dissolve(2),
@@ -98,21 +89,15 @@ BUILTIN_TRANSITIONS: Dict[str, TransitionSpec] = {
     "dspr": _dissolve(0.2),
     "dis": _dissolve(0.5),
     "hell_dissolve": _dissolve(3.0),
-
     "fade": _fade(0.5, 0.0, 0.5),
     "fade2": _fade(1.0, 0.0, 1.0),
     "fade3": _fade(1.5, 0.0, 1.5),
     "flash": _fade(0.25, 0.0, 0.75, color="#ffffff"),
-
     "pixellate": _pixellate(1.0, 5),
-
-                                                                            
-                                                                
     "blinds": TransitionSpec(kind=TransitionKind.IMAGE_DISSOLVE, duration=1.0,
                               mask_path="__builtin_blinds__", ramp=8),
     "squares": TransitionSpec(kind=TransitionKind.IMAGE_DISSOLVE, duration=1.0,
                                mask_path="__builtin_squares__", ramp=256),
-
     "wipeleft": _wipe(1.0, "left"),
     "wiperight": _wipe(1.0, "right"),
     "wipeup": _wipe(1.0, "up"),
@@ -127,23 +112,15 @@ BUILTIN_TRANSITIONS: Dict[str, TransitionSpec] = {
     "slideawaydown": _wipe(1.0, "down"),
     "irisin": _wipe(1.0, "left"),
     "irisout": _wipe(1.0, "right"),
-
     "pushleft": _push(1.0, "left"),
     "pushright": _push(1.0, "right"),
     "pushup": _push(1.0, "up"),
     "pushdown": _push(1.0, "down"),
-
     "vpunch": _punch("v"),
     "hpunch": _punch("h"),
 }
 
 TRANSITION_NAMES: List[str] = sorted(BUILTIN_TRANSITIONS.keys())
-
-
-                                                                              
-                                        
-                                                                              
-
 _BARE_NAME_RE = re.compile(r'^[A-Za-z_]\w*$')
 _CALL_RE = re.compile(r'^([A-Za-z_]\w*)\s*\((.*)\)\s*$', re.DOTALL)
 

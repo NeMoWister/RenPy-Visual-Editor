@@ -130,7 +130,7 @@ class CustomNodeTemplateStore:
 
     def render(self, template: CustomNodeTemplate, params: Dict[str, Any], pad: str = "") -> Optional[str]:
         """Рендерит код для КОНКРЕТНОЙ ноды (её собственные значения params).
-        Возвращает None, если Jinja2 не установлен."""     
+        Возвращает None, если Jinja2 не установлен."""               
         if not JINJA2_AVAILABLE:
             return None
         ctx = dict(template.default_params())

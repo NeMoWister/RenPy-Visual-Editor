@@ -24,12 +24,8 @@ from typing import Dict, List, Tuple
 from core.models import Project, SceneNode, NodeType
 from core.renpy_text_tags import strip_tags
 
-TOP_LONGEST_LINES = 10
-
-                                                                          
-                                                
+TOP_LONGEST_LINES = 10                  
 CHARS_PER_SECOND_READING = 1.0 / 0.045                                                     
-
 
 def estimate_line_seconds(raw_text: str) -> float:
     """Та же эвристика, что уже используется в автопрогоне презентации

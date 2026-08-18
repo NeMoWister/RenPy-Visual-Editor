@@ -153,11 +153,6 @@ class MenuChoiceRow(QFrame):
 
     def __init__(self, text="", jump="", use_call=False, raw_body="", nodes=None):
         super().__init__()
-                                                                           
-                                                                             
-                                                                         
-                                                                           
-                                                                       
         self.branch_nodes = nodes if nodes is not None else []
         self.setObjectName("surface_frame")
         self.setStyleSheet("padding:2px;")
@@ -285,12 +280,6 @@ class NodeEditor(QWidget):
         self.usage_store = None
         self.custom_template_store = None
         self._spellcheck_whitelist = None
-                                                                       
-                                                                      
-                                                                            
-                                                                            
-                                                                             
-                                                                               
         self.last_group_by_type: dict = {}
         self.node: SceneNode | None = None
         self.characters: list = []
@@ -467,12 +456,6 @@ class NodeEditor(QWidget):
             item = self.fields_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
-                                                                            
-                                                                              
-                                                                         
-                                                                              
-                                                                              
-                                                                       
         for attr in (
             "fadein_spin", "fadeout_spin", "ambience_fadeout_spin", "waveform",
             "audio_combo", "loop_check", "raw_edit", "char_combo",
@@ -870,29 +853,37 @@ class NodeEditor(QWidget):
         self.composite_sprite_carousel = None
         self.sprite_carousel = None
 
+        self.composite_label = None
+        self.plain_label = None
+
         if has_composite:
-            composite_label = QLabel(tr("ne.composite_sprites_label"))
-            composite_label.setObjectName("hint_text")
-            g.addWidget(composite_label)
+            self.composite_label = QLabel(tr("ne.composite_sprites_label"))
+            self.composite_label.setObjectName("hint_text")
+            g.addWidget(self.composite_label)
             self.composite_sprite_carousel = CompositeSpriteCarousel(self.rm, thumb_size=160)
             self.composite_sprite_carousel.set_resource_manager(self.rm)
             if n.sprite_var:
                 self.composite_sprite_carousel.select_by_name(n.sprite_var)
             self.composite_sprite_carousel.selection_changed.connect(self._on_composite_sprite_selected)
+            self.composite_sprite_carousel.browsing_changed.connect(self._on_composite_browsing_changed)
             g.addWidget(self.composite_sprite_carousel)
 
         if entries or not has_composite:
             if has_composite:
-                plain_label = QLabel(tr("ne.plain_sprites_label"))
-                plain_label.setObjectName("hint_text")
-                plain_label.setStyleSheet("padding-top:6px;")
-                g.addWidget(plain_label)
+                self.plain_label = QLabel(tr("ne.plain_sprites_label"))
+                self.plain_label.setObjectName("hint_text")
+                self.plain_label.setStyleSheet("padding-top:6px;")
+                g.addWidget(self.plain_label)
             self.sprite_carousel = FolderResourceCarousel(self.rm, category="sprites", thumb_size=160)
             self.sprite_carousel.set_resource_manager(self.rm, "sprites")
             if n.sprite_var:
                 self.sprite_carousel.select_by_var(n.sprite_var)
             self.sprite_carousel.selection_changed.connect(self._on_plain_sprite_selected)
             g.addWidget(self.sprite_carousel)
+
+                                                                              
+        if has_composite and self.composite_sprite_carousel.current_path:
+            self._on_composite_browsing_changed(True)
 
         if not entries and not has_composite:
             empty = QLabel(tr("ne.no_sprite_files"))
@@ -935,6 +926,15 @@ class NodeEditor(QWidget):
 
         self._insert(grp)
 
+    def _on_composite_browsing_changed(self, entered: bool):
+        """Пока пользователь листает атрибуты выбранного составного
+        персонажа, обычные папочные спрайты прячем - они относятся к
+        другому персонажу/набору ресурсов и только путают."""
+        if self.sprite_carousel is not None:
+            self.sprite_carousel.setVisible(not entered)
+        if self.plain_label is not None:
+            self.plain_label.setVisible(not entered)
+
     def _on_composite_sprite_selected(self, sprite):
                                                                         
                                                                        
@@ -945,8 +945,8 @@ class NodeEditor(QWidget):
 
     def _on_plain_sprite_selected(self, *_):
         if self.composite_sprite_carousel is not None:
-            self.composite_sprite_carousel.selected_sprite = None
-            self.composite_sprite_carousel._refresh_view()
+            self.composite_sprite_carousel.reset_silent()
+            self._on_composite_browsing_changed(False)
         self._apply()
 
     def _add_hide_fields(self):
@@ -1116,11 +1116,11 @@ class NodeEditor(QWidget):
         g.addWidget(self.custom_template_combo)
 
         current = self.custom_template_store.get(n.custom_template_id)
-        if current and current.description:
-            desc = QLabel(current.description)
-            desc.setWordWrap(True)
-            desc.setObjectName("hint_text")
-            g.addWidget(desc)
+        self.custom_desc_label = QLabel(current.description if current and current.description else "")
+        self.custom_desc_label.setWordWrap(True)
+        self.custom_desc_label.setObjectName("hint_text")
+        self.custom_desc_label.setVisible(bool(current and current.description))
+        g.addWidget(self.custom_desc_label)
 
         self.custom_params_box = QVBoxLayout()
         g.addLayout(self.custom_params_box)
@@ -1165,6 +1165,9 @@ class NodeEditor(QWidget):
             self.node.custom_template_id = template.template_id
             self.node.custom_params = template.default_params()
             self._rebuild_custom_param_fields(template)
+            if hasattr(self, "custom_desc_label"):
+                self.custom_desc_label.setText(template.description or "")
+                self.custom_desc_label.setVisible(bool(template.description))
             self._apply()
 
     def _add_audio_fields(self, t: str):
@@ -1525,8 +1528,6 @@ class NodeEditor(QWidget):
             if t == "show_cg":
                 self.node.cg_var = var
             else:
-                                                                        
-                                                                              
                 self.node.bg_var = var
             self.node.transition = self.trans_combo.currentText()
         elif t == "show_sprite":
@@ -1534,10 +1535,13 @@ class NodeEditor(QWidget):
             plain_selected = self.sprite_carousel.get_selected() if self.sprite_carousel else None
             if composite_selected is not None:
                 self.node.sprite_var = composite_selected.full_name
+                self.node.sprite_expression = None
             elif plain_selected is not None:
                 self.node.sprite_var = plain_selected.var_name
+                self.node.sprite_expression = None
             else:
                 self.node.sprite_var = ""
+                self.node.sprite_expression = None
             anchor_name = self.xalign_spin.currentData()
             self.node.xalign = NAMED_SPRITE_POSITIONS[anchor_name].xalign if anchor_name else 0.5
             self.node.transition = self.sprite_trans_combo.currentText()

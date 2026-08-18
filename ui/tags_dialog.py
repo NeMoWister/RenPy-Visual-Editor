@@ -22,7 +22,7 @@ from core.i18n import tr
 class TagPickerDialog(QDialog):
     """Выбор тегов для ОДНОГО ресурса (фона/CG) - чекбоксы, сгруппированные
     по категориям. Если категорий ещё нет, подсказывает создать их через
-    TagsManagerDialog."""        
+    TagsManagerDialog."""                        
 
     def __init__(self, tags_store: TagsStore, base_dir: str, var_name: str, display_name: str, parent=None):
         super().__init__(parent)

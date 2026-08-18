@@ -60,11 +60,7 @@ class GlassPanel(QFrame):
         super().moveEvent(event)
         self._request_capture()
 
-    def _request_capture(self):
-                                                                  
-                                                                        
-                                                                       
-                                                                       
+    def _request_capture(self):                   
         if self._capture_pending:
             return
         self._capture_pending = True
@@ -83,11 +79,7 @@ class GlassPanel(QFrame):
         try:
             geo = self.geometry()                            
             pixmap = QPixmap(parent.size())
-            pixmap.fill(Qt.GlobalColor.transparent)
-
-                                                                    
-                                                                      
-                                                                      
+            pixmap.fill(Qt.GlobalColor.transparent)              
             was_visible = self.isVisible()
             self.hide()
             parent.render(pixmap)

@@ -20,6 +20,7 @@ from core.resource_manager import ResourceManager
 from core.project_manager import ProjectManager, project_to_dict, project_from_dict
 from core.undo_manager import UndoManager
 from core.code_generator import generate_full_script, generate_defines_only
+from ui.export_project_dialog import ExportProjectDialog, ExportDefinesDialog
 from core.scene_state import compute_state_up_to
 from core import atl as atl_engine
 from core import transitions
@@ -94,6 +95,24 @@ DEFAULT_TAG_COLORS = ["#ff5b3d", "#ff8c3d", "#ffd23f", "#4cd97b", "#3fb6ff", "#a
 def _color_icon(hex_color: str) -> QIcon:
     pm = QPixmap(14, 14)
     pm.fill(QColor(hex_color))
+    return QIcon(pm)
+
+
+def _emoji_icon(emoji: str, size: int = 16) -> QIcon:
+    """Рисует символ (эмодзи/юникод-глиф) в отдельный QPixmap и оборачивает
+    в QIcon - чтобы использовать его как ИКОНКУ пункта меню (место слева от
+    текста, зарезервированное Qt под иконки у ВСЕХ пунктов меню одинаково),
+    а не как символ, вписанный прямо в текст пункта - из-за этого у таких
+    пунктов был другой отступ/выравнивание текста относительно остальных
+    пунктов меню, где иконки нет вовсе."""
+    pm = QPixmap(size, size)
+    pm.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pm)
+    font = painter.font()
+    font.setPointSize(int(size * 0.72))
+    painter.setFont(font)
+    painter.drawText(pm.rect(), Qt.AlignmentFlag.AlignCenter, emoji)
+    painter.end()
     return QIcon(pm)
 
 
@@ -193,8 +212,6 @@ class _SpellcheckWorker(QThread):
 
         def on_progress(done, total):
             nonlocal last_emitted
-                                                                       
-                                                          
             step = max(1, total // 200) if total else 1
             if done - last_emitted >= step or done == total:
                 last_emitted = done
@@ -250,8 +267,6 @@ class SceneListPanel(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 6, 6, 6)
         layout.setSpacing(6)
-
-                     
         scenes_group = QGroupBox(tr("mw.scenes_group"))
         self.scenes_group = scenes_group
         sg_layout = QVBoxLayout(scenes_group)
@@ -284,8 +299,6 @@ class SceneListPanel(QWidget):
         sg_layout.addLayout(sc_btn_row)
 
         layout.addWidget(scenes_group)
-
-                                                
         self._branch_bar = QFrame()
         self._branch_bar.setStyleSheet(
             "QFrame { background:#2d4a3a; border-radius:4px; }"
@@ -303,8 +316,6 @@ class SceneListPanel(QWidget):
         bb_layout.addWidget(btn_branch_back)
         self._branch_bar.setVisible(False)
         layout.addWidget(self._branch_bar)
-
-                             
         nodes_group = QGroupBox(tr("mw.scene_elements_group"))
         ng_layout = QVBoxLayout(nodes_group)
         ng_layout.setContentsMargins(4, 4, 4, 4)
@@ -672,8 +683,6 @@ class SceneListPanel(QWidget):
             return
         self.node_selected.emit(self._effective_scene_idx(), idx)
 
-                            
-
     def _add_scene(self):
         if not self.project:
             return
@@ -712,8 +721,6 @@ class SceneListPanel(QWidget):
             self._current_scene = max(0, idx - 1)
             self._rebuild_scenes()
             self.notify_current_selection()
-
-                           
 
     def add_node_of_type(self, node_type: NodeType, label: str = None):
         scene = self._get_current_scene()
@@ -807,8 +814,6 @@ class SceneListPanel(QWidget):
             scene.groups = [g for g in scene.groups if g.node_ids]
             self._rebuild_nodes()
             self.notify_current_selection()
-
-                         
 
     def set_nodes_color(self, rows: list, color: Optional[str]):
         scene = self._get_current_scene()
@@ -913,8 +918,6 @@ class SceneListPanel(QWidget):
         grp.color = color
         self._rebuild_nodes()
 
-                                          
-
     def _selected_node_rows(self) -> list:
         """Индексы (в scene.nodes) выбранных строк списка, заголовки групп
         игнорируются (они не выбираемы, но проверка на всякий случай)."""
@@ -1014,9 +1017,7 @@ class SceneListPanel(QWidget):
             return
         title, ok = QInputDialog.getText(self, tr("mw.new_group_title"), tr("mw.new_group_name_label"), text=tr("mw.new_group_default"))
         if ok and title.strip():
-            self.create_group(rows, title.strip())
-
-                                                                                
+            self.create_group(rows, title.strip())                           
 
     def _copy_nodes(self, rows: list):
         scene = self._get_current_scene()
@@ -1054,8 +1055,6 @@ class SceneListPanel(QWidget):
         if not data:
             return
         self.paste_nodes_after(row, data)
-
-                                             
 
     def _on_search_text(self, text: str):
         scene = self._get_current_scene()
@@ -1219,10 +1218,7 @@ class ScenePreviewPanel(QWidget):
             self._current_node = None
             self.step_lbl.setText(tr("mw.no_step_selected"))
             return
-
-                                                                              
-                                                                            
-                                                                       
+                      
         trigger_spec = None
         if (prev_scene is scene and prev_index is not None and prev_index >= 0
                 and node_index == prev_index + 1):
@@ -1234,9 +1230,7 @@ class ScenePreviewPanel(QWidget):
         old_snapshot = self.preview.snapshot_current() if trigger_spec is not None else None
 
         state = compute_state_up_to(scene, node_index, rm=self.rm)
-        self._current_node = scene.nodes[node_index]
-
-                                                 
+        self._current_node = scene.nodes[node_index]                     
         bg_path = self._resolve_path(state.cg_var) or self._resolve_path(state.bg_var)
         self.preview.set_background(bg_path, atl_script=state.bg_atl_script)
 
@@ -1299,9 +1293,7 @@ class ScenePreviewPanel(QWidget):
         if trigger_spec is not None:
             self.preview.start_transition(old_snapshot, trigger_spec)
 
-    def _on_sprite_dragged(self, xalign: float):
-                                                                             
-                                                              
+    def _on_sprite_dragged(self, xalign: float):                              
         if self._current_node and self._current_node.node_type == NodeType.SHOW_SPRITE:
             self._current_node.xalign = xalign
             self.sprite_position_changed.emit(xalign)
@@ -1332,24 +1324,14 @@ class ScenePreviewPanel(QWidget):
                     self.sprite_node_deleted.emit()
                     self.show_state(scene, self._current_node_index, self.project)
                     return
-            elif node.node_type == NodeType.SCENE:
-                                                                                    
-                                                                         
+            elif node.node_type == NodeType.SCENE:                               
                 break
 
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle(tr("main_window.title"))
-                                                                              
-                                                                              
-                                                                          
-                                                                             
-                                                                            
-                                                                             
-                                                                            
-                                                                          
+        self.setWindowTitle(tr("main_window.title"))                 
         screen = QApplication.primaryScreen()
         avail = screen.availableGeometry() if screen else None
         min_w, min_h = 1600, 860
@@ -1533,10 +1515,7 @@ class MainWindow(QMainWindow):
         main_layout = QHBoxLayout(central)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
-
         splitter = QSplitter(Qt.Orientation.Horizontal)
-
-                                  
         self.scene_panel = SceneListPanel()
         self.scene_panel.setMinimumWidth(320)
         self.scene_panel.setMaximumWidth(320)
@@ -1551,8 +1530,6 @@ class MainWindow(QMainWindow):
         self.scene_panel.tags_store = self.tags_store
         self.scene_panel.usage_store = self.usage_store
         self.scene_panel.get_characters = lambda: (self.project.characters if self.project else [])
-
-                               
         self.node_editor = NodeEditor(self.rm)
         self.node_editor.tags_store = self.tags_store
         self.node_editor.usage_store = self.usage_store
@@ -1568,8 +1545,6 @@ class MainWindow(QMainWindow):
         scroll.setMinimumWidth(440)
         splitter.addWidget(scroll)
         self.scene_panel.main_splitter = splitter
-
-                                            
         self.preview_panel = ScenePreviewPanel()
         self.preview_panel.set_context(self.rm, self.pm.project)
         self.preview_panel.setMinimumWidth(680)
@@ -1587,8 +1562,6 @@ class MainWindow(QMainWindow):
 
     def _setup_menu(self):
         mb = self.menuBar()
-
-              
         file_menu = mb.addMenu(tr("menu.file"))
 
         act_new = QAction(tr("menu.file.new"), self)
@@ -1662,8 +1635,6 @@ class MainWindow(QMainWindow):
         act_editor_settings = QAction(tr("menu.edit.editor_settings"), self)
         act_editor_settings.triggered.connect(self._edit_editor_settings)
         edit_menu.addAction(act_editor_settings)
-
-                
         proj_menu = mb.addMenu(tr("menu.project"))
 
         act_chars = QAction(tr("menu.project.characters"), self)
@@ -1686,16 +1657,16 @@ class MainWindow(QMainWindow):
         proj_menu.addAction(act_code_templates)
 
         proj_menu.addSeparator()
-        act_presentation = QAction(tr("menu.project.presentation"), self)
+        act_presentation = QAction(_emoji_icon("▶"), tr("menu.project.presentation"), self)
         act_presentation.setShortcut(QKeySequence("Shift+F5"))
         act_presentation.triggered.connect(self._start_presentation)
         proj_menu.addAction(act_presentation)
 
-        act_timing = QAction(tr("menu.project.timing"), self)
+        act_timing = QAction(_emoji_icon("⏱"), tr("menu.project.timing"), self)
         act_timing.triggered.connect(self._show_timing_report)
         proj_menu.addAction(act_timing)
 
-        act_spellcheck = QAction(tr("menu.project.spellcheck"), self)
+        act_spellcheck = QAction(_emoji_icon("🔤"), tr("menu.project.spellcheck"), self)
         act_spellcheck.triggered.connect(self._show_spellcheck_report)
         proj_menu.addAction(act_spellcheck)
 
@@ -1736,8 +1707,6 @@ class MainWindow(QMainWindow):
         act_label = QAction(tr("menu.project.main_label"), self)
         act_label.triggered.connect(self._set_main_label)
         proj_menu.addAction(act_label)
-
-                   
         gen_menu = mb.addMenu(tr("menu.generation"))
 
         act_preview = QAction(tr("menu.generation.preview"), self)
@@ -1763,17 +1732,17 @@ class MainWindow(QMainWindow):
         gen_menu.addAction(act_defines)
 
         gen_menu.addSeparator()
-        act_res_defines = QAction(tr("menu.generation.export_resource_defines"), self)
-        act_res_defines.triggered.connect(self._export_resource_defines)
-        gen_menu.addAction(act_res_defines)
+        act_export_project = QAction(tr("menu.generation.export_project"), self)
+        act_export_project.setIconText(tr("menu.generation.export_project_short"))
+        act_export_project.triggered.connect(self._export_project)
+        gen_menu.addAction(act_export_project)
+        self.act_export_project = act_export_project
 
                  
         stats_menu = mb.addMenu(tr("menu.stats"))
         act_stats = QAction(tr("menu.stats.dialogue"), self)
         act_stats.triggered.connect(self._show_dialogue_stats)
         stats_menu.addAction(act_stats)
-
-                 
         help_menu = mb.addMenu(tr("menu.help"))
 
         act_guide = QAction(tr("menu.help.guide"), self)
@@ -1803,13 +1772,6 @@ class MainWindow(QMainWindow):
         self.addToolBar(tb)
         style = self.style()
         SP = QStyle.StandardPixmap
-
-                                                                          
-                                                                   
-                                                                 
-                                                                 
-                                                                    
-                                                                        
         def with_icon(action: QAction, icon) -> QAction:
             action.setIcon(style.standardIcon(icon))
             return action
@@ -1824,10 +1786,9 @@ class MainWindow(QMainWindow):
         tb.addSeparator()
         tb.addAction(with_icon(self.act_preview, SP.SP_FileDialogDetailedView))
         tb.addAction(with_icon(self.act_export, SP.SP_DialogSaveButton))
+        tb.addAction(with_icon(self.act_export_project, SP.SP_DriveHDIcon))
         tb.addSeparator()
         tb.addAction(with_icon(self.act_guide, SP.SP_DialogHelpButton))
-
-                          
         tb.addSeparator()
         self.lbl_project = QLabel()
         self.lbl_project.setObjectName("accent_caption")
@@ -1848,8 +1809,6 @@ class MainWindow(QMainWindow):
             tr("mw.status_resources", bg=counts.get('bg',0), cg=counts.get('cg',0),
                sprites=counts.get('sprites',0), music=counts.get('music',0), sounds=counts.get('sounds',0))
         )
-
-                                                         
 
     def _load_project_to_ui(self):
         p = self.pm.project
@@ -1872,8 +1831,6 @@ class MainWindow(QMainWindow):
         self._edit_group_open = False
         self._node_load_snapshot = project_to_dict(p)
         self._update_undo_actions()
-
-                                                        
 
     def _mark_dirty(self):
         if not self._dirty:
@@ -1975,8 +1932,6 @@ class MainWindow(QMainWindow):
 
         self._update_undo_actions()
 
-                                                        
-
     def _new_project(self):
         reply = QMessageBox.question(self, tr("mw.new_project_title"),
                                      tr("mw.new_project_confirm"))
@@ -2031,8 +1986,6 @@ class MainWindow(QMainWindow):
                 self.status_lbl.setText(tr("mw.saved_label", path=path))
             else:
                 QMessageBox.critical(self, tr("mw.error_title"), tr("mw.save_failed"))
-
-                                                        
 
     def _rename_project(self):
         name, ok = QInputDialog.getText(self, tr("mw.rename_project_title"),
@@ -2195,9 +2148,6 @@ class MainWindow(QMainWindow):
     def _on_find_replace_applied(self):
         self._load_project_to_ui()
         self.status_lbl.setText(tr("mw.mass_replace_applied"))
-                                                                             
-                                                                               
-                                                   
         self._rescan_resources()
 
     def _edit_tags(self):
@@ -2206,8 +2156,6 @@ class MainWindow(QMainWindow):
         dlg.exec()
 
     def _on_tags_changed(self):
-                                                                           
-                                                               
         if hasattr(self.node_editor, "bg_carousel") and self.node_editor.bg_carousel is not None:
             try:
                 self.node_editor.bg_carousel.refresh_tag_categories()
@@ -2287,9 +2235,6 @@ class MainWindow(QMainWindow):
             name_key = (pc.name or "").strip().lower()
             existing = existing_by_name.get(name_key) if name_key else None
             if existing is not None:
-                                                                           
-                                                                        
-                                                                          
                 matched_by_name += 1
                 continue
             new_char = Character(name=pc.name, variable=pc.variable, color=pc.color)
@@ -2320,9 +2265,6 @@ class MainWindow(QMainWindow):
         self.app_settings.save(BASE_DIR)
 
     def _start_update_check(self, manual: bool = False):
-                                                                     
-                                                                          
-                                                      
         if self._update_thread is not None and self._update_thread.isRunning():
             if manual:
                 QMessageBox.information(self, tr("mw.updates_title"), tr("mw.update_check_in_progress"))
@@ -2343,8 +2285,6 @@ class MainWindow(QMainWindow):
             return
 
         if not manual and release.get("version") == self.app_settings.skipped_version:
-                                                                      
-                                                                      
             return
 
         dlg = UpdateAvailableDialog(release, self)
@@ -2372,8 +2312,6 @@ class MainWindow(QMainWindow):
         counts = sum(len(v) for v in self.rm.resources.values())
         self.status_lbl.setText(tr("mw.resources_rescanned", count=counts))
         self._refresh_preview()
-
-                                                            
 
     def _on_scene_selected(self, scene_idx: int):
         pass                                              
@@ -2497,9 +2435,6 @@ class MainWindow(QMainWindow):
         self.scene_panel.refresh_current_node_text()
 
     def _on_sprite_node_deleted_in_preview(self):
-                                                                       
-                                                                       
-                                                              
         new_idx = getattr(self.preview_panel, "_current_node_index", -1)
         self.scene_panel._rebuild_nodes()
         self.scene_panel._select_node_row(max(0, new_idx))
@@ -2513,8 +2448,6 @@ class MainWindow(QMainWindow):
         else:
             scene = p.scenes[scene_idx] if 0 <= scene_idx < len(p.scenes) else None
         self.preview_panel.show_state(scene, node_idx, p)
-
-                                                       
 
     def _show_code_preview(self):
         full = generate_full_script(self.pm.project, rm=self.rm, custom_templates=self.custom_node_template_store,
@@ -2560,6 +2493,9 @@ class MainWindow(QMainWindow):
         dlg.exec()
 
     def _export_rpy(self):
+        """Экспорт .rpy - ТОЛЬКО сам сценарий (label'ы, реплики, show/scene
+        и т.п.), без единого define/image. Объявления персонажей, кастомных
+        переходов и ресурсов теперь отдельно - см. _export_defines."""
         path, _ = QFileDialog.getSaveFileName(
             self, tr("mw.export_script_title"), "script.rpy",
             f"Ren'Py Script (*.rpy);;{tr('mw.all_files2')} (*)"
@@ -2567,7 +2503,7 @@ class MainWindow(QMainWindow):
         if path:
             try:
                 code = generate_full_script(self.pm.project, rm=self.rm, custom_templates=self.custom_node_template_store,
-                                             nvl_style=self.app_settings.nvl_codegen_style)
+                                             nvl_style=self.app_settings.nvl_codegen_style, include_defines=False)
                 written_path = self._write_rpy_with_diff_check(path, code)
                 if written_path is None:
                     self.status_lbl.setText(tr("mw.export_cancelled"))
@@ -2578,38 +2514,34 @@ class MainWindow(QMainWindow):
                 QMessageBox.critical(self, tr("mw.error_title"), str(e))
 
     def _export_defines(self):
-        path, _ = QFileDialog.getSaveFileName(
-            self, tr("mw.export_defines_title"), "defines.rpy",
-            f"Ren'Py Script (*.rpy);;{tr('mw.all_files2')} (*)"
+        """Экспорт defines.rpy (персонажи / кастомные переходы / defines
+        ресурсов) - через диалог с чекбоксами на каждый блок, см.
+        ui/export_project_dialog.py::ExportDefinesDialog."""
+        if not self.pm or not self.pm.project:
+            return
+        dlg = ExportDefinesDialog(
+            self.pm.project, rm=self.rm, parent=self,
+            nvl_style=self.app_settings.nvl_codegen_style,
         )
-        if path:
-            try:
-                code = self.rm.generate_define_block() + "\n" + generate_defines_only(
-                    self.pm.project, nvl_style=self.app_settings.nvl_codegen_style, rm=self.rm
-                )
-                written_path = self._write_rpy_with_diff_check(path, code)
-                if written_path is None:
-                    self.status_lbl.setText(tr("mw.export_cancelled"))
-                    return
-                self.status_lbl.setText(tr("mw.defines_exported", path=written_path))
-            except Exception as e:
-                QMessageBox.critical(self, tr("mw.error_title"), str(e))
+        dlg.exec()
 
-    def _export_resource_defines(self):
-        path, _ = QFileDialog.getSaveFileName(
-            self, tr("mw.export_resource_defines_title"), "resources_defines.rpy",
-            f"Ren'Py Script (*.rpy);;{tr('mw.all_files2')} (*)"
+    def _export_project(self):
+        """Экспорт всего проекта: сценарий (одним файлом или разбитым) +
+        отдельный defines.rpy (персонажи/переходы/ресурсы - каждый блок
+        можно выключить) + ТОЛЬКО используемые файлы ресурсов, разложенные
+        точно по путям, что фигурируют в сгенерированном коде (см.
+        ui/export_project_dialog.py, core/project_export.py)."""
+        if not self.pm or not self.pm.project:
+            return
+        if not self.pm.project.scenes:
+            QMessageBox.information(self, tr("mw.export_title"), tr("mw.no_scenes_to_export"))
+            return
+
+        dlg = ExportProjectDialog(
+            self.pm.project, rm=self.rm, custom_templates=self.custom_node_template_store,
+            parent=self, nvl_style=self.app_settings.nvl_codegen_style,
         )
-        if path:
-            try:
-                code = self.rm.generate_define_block()
-                written_path = self._write_rpy_with_diff_check(path, code)
-                if written_path is None:
-                    self.status_lbl.setText(tr("mw.export_cancelled"))
-                    return
-                self.status_lbl.setText(tr("mw.resource_defines_saved", path=written_path))
-            except Exception as e:
-                QMessageBox.critical(self, tr("mw.error_title"), str(e))
+        dlg.exec()
 
     def closeEvent(self, event):
         self.app_settings.window_geometry = bytes(self.saveGeometry()).hex()

@@ -51,8 +51,6 @@ from core.models import (
 )
 from core import atl as atl_engine
 
-                                                                              
-
 
 def _strip_trailing_comment(line: str) -> str:
     """Убирает строчный комментарий вне кавычек (комментарий ВНУТРИ строки,
@@ -80,8 +78,7 @@ _AT_RE = re.compile(r'\bat\s+(\w+)\s*$')
 _FADE_RE = re.compile(r'fadein\s+([\d.]+)')
 _FADEOUT_RE = re.compile(r'fadeout\s+([\d.]+)')
 _STANDALONE_WITH_RE = re.compile(r'^with\s+(.+)$')
-
-                                                                           
+                                                           
                                                    
 _PENDING_TRANSITION_TYPES = {
     NodeType.SCENE, NodeType.SHOW_BG, NodeType.SHOW_CG,
@@ -110,9 +107,6 @@ def _parse_at(tail: str) -> Tuple[str, Optional[SpritePosition]]:
     name = m.group(1).lower()
     pos = NAMED_SPRITE_POSITIONS.get(name, SpritePosition(0.5, 1.0))
     return tail[:m.start()].strip(), pos
-
-
-                                                                               
 
 
 @dataclass
@@ -158,16 +152,10 @@ def _dedent_block(tokens: List[LineToken], start: int, end: int, base_indent: in
     return lines
 
 
-                                                                               
-
-
 @dataclass
 class ScriptImportReport:
     scenes: List[Scene] = field(default_factory=list)
-    unrecognized: List[Tuple[int, str]] = field(default_factory=list)                  
-                                                                      
-                                                                           
-                                                            
+    unrecognized: List[Tuple[int, str]] = field(default_factory=list)                                          
     needs_resource: List[Tuple[int, str, str]] = field(default_factory=list)
     total_nodes: int = 0
     total_lines: int = 0
@@ -182,9 +170,6 @@ class ScriptImportReport:
             if n.node_type == NodeType.RAW
         )
         return 100.0 * (self.total_nodes - raw_nodes) / self.total_nodes
-
-
-                                                                              
 
 
 class RpyScriptParser:
@@ -224,7 +209,6 @@ class RpyScriptParser:
         report.total_nodes = sum(len(sc.nodes) for sc in report.scenes)
         return report
 
-                                                                          
 
     def _parse_one(self, i: int) -> int:
         tokens = self._tokens
@@ -237,7 +221,6 @@ class RpyScriptParser:
             self._add(SceneNode(node_type=NodeType.COMMENT, comment_text=text_c))
             return i + 1
 
-                                                                         
         m = re.match(r'^label\s+(\w+)\s*:', s)
         if m:
             self._flush_pending()
@@ -251,19 +234,16 @@ class RpyScriptParser:
             self._add(SceneNode(node_type=NodeType.LABEL, label_name=lname))
             return i + 1
 
-                                                                         
         if s == 'nvl clear':
             self._flush_pending()
             self._add(SceneNode(node_type=NodeType.NVL_MODE, nvl_action='clear'))
             return i + 1
 
-                                                                         
         if s == 'return':
             self._flush_pending()
             self._add(SceneNode(node_type=NodeType.RETURN))
             return i + 1
-
-                                                                           
+        
         m = re.match(r'^pause(?:\s+([\d.]+))?\s*$', s)
         if not m:
             m = re.match(r'^pause\s*\(\s*([\d.]+)?\s*\)\s*$', s)
@@ -272,8 +252,7 @@ class RpyScriptParser:
             dur = float(m.group(1)) if m.group(1) else 0.0
             self._add(SceneNode(node_type=NodeType.PAUSE, pause_duration=dur))
             return i + 1
-
-                                                                         
+        
         m = re.match(r'^(jump|call)\s+(\w+)\s*$', s)
         if m:
             self._flush_pending()
@@ -281,7 +260,6 @@ class RpyScriptParser:
             self._add(SceneNode(node_type=NodeType.JUMP, jump_target=target, python_code=kw))
             return i + 1
 
-                                                                        
         m = re.match(r'^window\s+(show|hide)\s*(.*)$', s)
         if m:
             action, tail = m.group(1), m.group(2)
@@ -293,8 +271,7 @@ class RpyScriptParser:
             else:
                 self._pending.clear()
             return i + 1
-
-                                                                        
+          
         m = _STANDALONE_WITH_RE.match(s)
         if m:
             trans = m.group(1)
@@ -305,8 +282,7 @@ class RpyScriptParser:
             else:
                 self._add(SceneNode(node_type=NodeType.WITH_TRANSITION, transition=trans))
             return i + 1
-
-                                                                          
+         
         m = re.match(r'^stop\s+(music|ambience)\s*(.*)', s)
         if m:
             self._flush_pending()
@@ -318,8 +294,7 @@ class RpyScriptParser:
             else:
                 self._add(SceneNode(node_type=NodeType.STOP_AMBIENCE, ambience_fadeout=fo))
             return i + 1
-
-                                                                          
+           
         m = re.match(r'^play\s+(music|sound|ambience)\s+(.+)', s)
         if m:
             self._flush_pending()
@@ -343,8 +318,7 @@ class RpyScriptParser:
             else:
                 self._add(SceneNode(node_type=NodeType.PLAY_SOUND, sound_var=var))
             return i + 1
-
-                                                                         
+ 
         m = re.match(r'^\$\s*(.*)', s)
         if m:
             code = m.group(1).rstrip()
@@ -361,7 +335,6 @@ class RpyScriptParser:
                 self._add(SceneNode(node_type=NodeType.PYTHON, python_code=code))
             return i + 1
 
-                                                                          
         if s == 'python:':
             self._flush_pending()
             end = self._block_end(i + 1, tok.indent)
@@ -369,7 +342,6 @@ class RpyScriptParser:
             self._add(SceneNode(node_type=NodeType.PYTHON, python_code='\n'.join(lines)))
             return end
 
-                                                                         
         m = re.match(r'^scene\s+(.*)', s)
         if m:
             return self._parse_scene_or_show(i, NodeType.SCENE, m.group(1).strip())
@@ -377,7 +349,6 @@ class RpyScriptParser:
         if m:
             return self._parse_scene_or_show(i, None, m.group(1).strip())
 
-                                                                         
         m = re.match(r'^hide\s+(.*)', s)
         if m:
             tail = m.group(1).strip()
@@ -390,27 +361,22 @@ class RpyScriptParser:
                 self._pending.clear()
             return i + 1
 
-                                                                        
         if s == 'menu:' or re.match(r'^menu\s*:', s):
             self._flush_pending()
             return self._parse_menu(i + 1, tok.indent)
 
-                                                                       
         node = self._try_parse_dialogue(s)
         if node is not None:
             self._flush_pending()
             self._add(node)
             return i + 1
 
-                                                                          
         self._flush_pending()
         end = self._block_end(i + 1, tok.indent)
         lines = _dedent_block(self._tokens, i, end, tok.indent)
         self._report.unrecognized.append((tok.lineno, s))
         self._add(SceneNode(node_type=NodeType.RAW, python_code='\n'.join(lines)))
         return end
-
-                                                                          
 
     def _add(self, node: SceneNode):
         self._current_scene.nodes.append(node)
@@ -448,13 +414,6 @@ class RpyScriptParser:
 
         end_index = block_end
         trailing_with_consumed = False
-                                                                         
-                                                                   
-                                                                        
-                                                                     
-                                                                      
-                                                                        
-                            
         if has_colon and end_index < len(tokens) and tokens[end_index].indent == tok.indent:
             wm = _STANDALONE_WITH_RE.match(tokens[end_index].stripped)
             if wm:
@@ -463,22 +422,11 @@ class RpyScriptParser:
                 end_index += 1
                 trailing_with_consumed = True
 
-                                                                              
-                                                                             
-                                                                              
-                                                                            
-                                                                              
-                                                                            
-                                                                             
-                                                                            
-                                                                             
         atl_script = ""
         if block_tokens:
             body_base_indent = block_tokens[0].indent
             atl_script = '\n'.join(_dedent_block(tokens, block_start, block_end, body_base_indent))
             if pos is None:
-                                                                             
-                                                                           
                 base_xalign, base_yalign = 0.5, 1.0
                 fx, fy, fz = atl_engine.quick_final_position(atl_script, base_xalign, base_yalign, 1.0)
                 pos = SpritePosition(xalign=fx, yalign=fy, zoom=fz)
@@ -495,9 +443,6 @@ class RpyScriptParser:
             elif var.startswith('bg ') or var.startswith('cg '):
                 node_type = NodeType.SHOW_BG if var.split()[0] == 'bg' else NodeType.SHOW_CG
             else:
-                                                                       
-                                                                               
-                                                                               
                 controlling_word = var.split()[0] if var.split() else ""
                 has_matching_sprite = controlling_word and any(
                     sv == controlling_word or sv.startswith(controlling_word + " ")
@@ -507,18 +452,10 @@ class RpyScriptParser:
                                                                          
                     node_type = NodeType.SHOW_SPRITE
                 elif not has_colon:
-                                                                               
-                                                                             
-                                                                              
-                                                                              
-                                                                        
                     node_type = NodeType.SHOW_SPRITE
                     unresolved_var = True
                 else:
-                                                                       
-                                                                       
-                    node_type = None                             
-
+                    node_type = None
         if node_type is None:
                                                                          
             lines = _dedent_block(tokens, tok_idx, end_index, tok.indent)
@@ -556,8 +493,6 @@ class RpyScriptParser:
         while i < len(tokens) and tokens[i].indent > parent_indent:
             tok = tokens[i]
             s = tok.stripped
-
-                                                                   
             if s.startswith('"') and s.endswith('"') and not prompt_set:
                 is_prompt = i + 1 < len(tokens) and tokens[i + 1].stripped.startswith('"')
                 if is_prompt:
@@ -590,9 +525,6 @@ class RpyScriptParser:
                         jump_target = jm.group(2)
 
                 if not jump_target and stripped_body:
-                                                                               
-                                                                            
-                                                                     
                     branch_nodes = self._parse_choice_body(body_start, body_end)
 
                 choices.append({

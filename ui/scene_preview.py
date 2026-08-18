@@ -13,12 +13,7 @@ from ui.transition_compositor import render_transition_frame, punch_offset
 
 PREVIEW_W = 640
 PREVIEW_H = 360
-CLICK_DRAG_THRESHOLD = 4                                                                
-
-                                                                           
-                                                                          
-                                                                  
-                                                      
+CLICK_DRAG_THRESHOLD = 4
 ANCHOR_XALIGNS = [NAMED_SPRITE_POSITIONS[name].xalign for name, _ in ANCHOR_POSITIONS]
 
 
@@ -269,13 +264,21 @@ class ScenePreview(QWidget):
     def _sprite_rect(self, layer: SpriteLayer) -> QRect:
         pm = layer.pixmap
         vis = self._resolved_layer_transform(layer)
-        w = int(pm.width() * vis["zoom"])
-        h = int(pm.height() * vis["zoom"])
-        max_h = int(PREVIEW_H * 0.85)
-        if h > max_h:
-            scale = max_h / h
-            w = int(w * scale)
-            h = max_h
+        natural_w, natural_h = pm.width(), pm.height()
+        if natural_h <= 0:
+            return QRect(0, 0, 0, 0)
+        fit_h = int(PREVIEW_H * 0.85)
+        base_scale = min(1.0, fit_h / natural_h)
+        scale = base_scale * max(vis["zoom"], 0.01)
+
+        w = int(natural_w * scale)
+        h = int(natural_h * scale)
+        hard_max_h = int(PREVIEW_H * 1.35)
+        if h > hard_max_h:
+            shrink = hard_max_h / h
+            w = int(w * shrink)
+            h = hard_max_h
+
         x = int(vis["xalign"] * PREVIEW_W - w / 2)
         y = int(vis["yalign"] * PREVIEW_H - h) - 10
         return QRect(x, y, w, h)
@@ -315,11 +318,6 @@ class ScenePreview(QWidget):
 
         if self.dialogue_text or self.char_name:
             if self.nvl_mode:
-                                                                          
-                                                                           
-                                                                          
-                                                                         
-                                                                           
                 dbox_h = int(PREVIEW_H * 0.88)
                 painter.fillRect(0, 0, PREVIEW_W, dbox_h, QColor(6, 6, 10, 200))
                 painter.setPen(QColor("#ffb84d"))
@@ -362,10 +360,6 @@ class ScenePreview(QWidget):
                     painter.drawText(QRect(10, dbox_y - 22, 120, 22), Qt.AlignmentFlag.AlignCenter, self.char_name)
                 painter.setPen(QColor(220, 220, 220))
                 painter.setFont(QFont("Arial", 12))
-                                                                              
-                                                                          
-                                                                        
-                             
                 self._draw_rich_text(
                     painter, QRect(20, dbox_y + 10, PREVIEW_W - 40, dbox_h - 20),
                     self.dialogue_text, clip=False
@@ -455,9 +449,6 @@ class ScenePreview(QWidget):
 
     def mouseReleaseEvent(self, event):
         if self.dragging_sprite_idx is not None and not self.did_drag:
-                                                                            
-                                                                       
-                                                                            
             tag = self.sprites[self.dragging_sprite_idx].tag
             self.sprite_delete_requested.emit(tag)
         self.dragging_sprite_idx = None

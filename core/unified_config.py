@@ -29,9 +29,6 @@ import threading
 
 CONFIG_FILENAME = "editor_config.json"
 
-                                                                         
-                                                                       
-                                                      
 _LEGACY_FILES = {
     "app_settings.json": "app_settings",
     "characters_config.json": "characters",

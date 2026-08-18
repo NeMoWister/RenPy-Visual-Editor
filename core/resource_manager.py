@@ -2,7 +2,10 @@
 import os, json, re
 from typing import Dict, List, Optional
 from dataclasses import dataclass, field, asdict
-from core.composite_sprite_parser import CompositeSprite, parse_sprites_rpy_file
+from core.composite_sprite_parser import (
+    CompositeSprite, parse_sprites_rpy_file, get_standalone_attr_words,
+    parse_exceptions_file, EXCEPTIONS_FILENAME,
+)
 from core.unified_config import load_section, save_section
 
 IMAGE_EXTS = {'.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif'}
@@ -18,6 +21,16 @@ def filename_to_var(filename: str) -> str:
     if name and name[0].isdigit():
         name = '_' + name
     return name.lower()
+
+
+@dataclass
+class AttrGroup:
+    """Одна независимая группа-колонка атрибутов составного спрайта в UI
+    (аналог группы в layeredimage). optional=True для необязательных
+    аксессуаров (см. get_standalone_attr_words) - такую группу можно
+    оставить невыбранной, и это тоже валидный выбор."""
+    words: List[str]
+    optional: bool = False
 
 
 @dataclass
@@ -60,7 +73,7 @@ class ResourceManager:
     }
     RENPY_PREFIX = {
         'bg': 'bg', 'cg': 'cg', 'sprites': '',
-        'music': '', 'sounds': 'sfx_', 'ambience': '',
+        'music': '', 'sounds': 'sfx_', 'ambience': 'ambience_',
     }
                                                                         
                                                                  
@@ -71,6 +84,7 @@ class ResourceManager:
         self.config = self._load_config()
         self.resources: Dict[str, List[ResourceEntry]] = {cat: [] for cat in self.CATEGORIES}
         self.composite_sprites: List[CompositeSprite] = []
+        self.composite_exceptions: Dict[str, set] = {}
 
     def _load_config(self) -> ResourcesConfig:
         data = load_section(self.base_dir, "resources")
@@ -182,37 +196,52 @@ class ResourceManager:
                     self._scan_nested(cat, cat_dir, exts, source)
                 else:
                     self._scan_flat(cat, cat_dir, exts, source)
-        self._scan_composite_sprites()
+        self._scan_sprite_definitions()
 
-    def _scan_composite_sprites(self):
-        """Если в <default|custom>/sprites/sprites.rpy есть составные
-        спрайты (ConditionSwitch / im.MatrixColor с im.Composite слоями) -
-        парсим их отдельно (из обоих источников сразу, если файл есть в
-        обоих) и убираем использованные в них файлы из обычного плоского
-        списка self.resources['sprites'], чтобы один и тот же файл не
-        показывался дважды (как отдельный слой и как часть составного
-        спрайта). Файлы, не упомянутые в sprites.rpy, продолжают работать
-        как раньше - обычными папочными спрайтами. Составные спрайты не
-        попадают в generate_define_block независимо от источника - они уже
-        объявлены в самом sprites.rpy."""
+    def _scan_sprite_definitions(self):
+        """Составные спрайты персонажей (image <персонаж> <атрибуты...> [far|close|normal]
+        = ConditionSwitch(...)/im.MatrixColor(.../im.Composite(...))) читаются
+        ИСКЛЮЧИТЕЛЬНО из <source>/sprites/sprites.rpy, если он есть. Никакой
+        автогенерации/автообъявления по структуре папок больше нет: если
+        файла нет (или персонаж в нём не упомянут) - для этого персонажа
+        просто не будет составных спрайтов, а сами файлы (если есть) останутся
+        обычными плоскими ресурсами категории sprites.
+
+        Файлы, задействованные как слои составных спрайтов, убираются из
+        плоского self.resources['sprites'], чтобы не показываться дважды -
+        как отдельный файл и как часть персонажа.
+        """
         self.composite_sprites = []
+        self.composite_exceptions: Dict[str, set] = {}
         used_rel_paths_by_source = {"default": set(), "custom": set()}
-
-        for source in SOURCES:
-            rpy_path = os.path.join(self.get_source_root(source), 'sprites', 'sprites.rpy')
-            if not os.path.isfile(rpy_path):
-                continue
-            try:
-                parsed = parse_sprites_rpy_file(rpy_path, source=source)
-            except Exception:
-                continue
-            self.composite_sprites.extend(parsed)
-            for cs in parsed:
-                for layer in cs.layers:
-                    used_rel_paths_by_source[source].add(layer.rel_path.replace('\\', '/'))
 
         def entry_rel_path(e: ResourceEntry) -> str:
             return f"{e.group_path}/{e.filename}" if e.group_path else e.filename
+
+        for source in SOURCES:
+            sprites_dir = os.path.join(self.get_source_root(source), 'sprites')
+            rpy_path = os.path.join(sprites_dir, 'sprites.rpy')
+            if not os.path.isfile(rpy_path):
+                continue
+            try:
+                composites = parse_sprites_rpy_file(rpy_path, source=source)
+            except Exception:
+                composites = []
+            self.composite_sprites.extend(composites)
+            for cs in composites:
+                for layer in cs.layers:
+                    used_rel_paths_by_source[source].add(layer.rel_path.replace('\\', '/'))
+
+            # exceptions.txt лежит рядом с sprites.rpy (в той же папке
+            # sprites/) - персонаж -> слова, которые всегда должны стать
+            # собственным необязательным атрибутом (см. get_standalone_attr_words)
+            exceptions_path = os.path.join(sprites_dir, EXCEPTIONS_FILENAME)
+            try:
+                exceptions = parse_exceptions_file(exceptions_path)
+            except Exception:
+                exceptions = {}
+            for character, words in exceptions.items():
+                self.composite_exceptions.setdefault(character, set()).update(words)
 
         filtered = []
         for e in self.resources['sprites']:
@@ -220,6 +249,7 @@ class ResourceManager:
             if entry_rel_path(e) not in used:
                 filtered.append(e)
         self.resources['sprites'] = filtered
+
 
     def _scan_flat(self, cat: str, cat_dir: str, exts: set, source: str):
         for fn in sorted(os.listdir(cat_dir)):
@@ -280,7 +310,8 @@ class ResourceManager:
                      подпапок персонажа/вариации (sprites_us_normal_smile).
         - music:     music_list["name"] - ссылка на словарь треков, который
                      уже определён в проекте Ren'Py, мы его не генерируем.
-        - sounds:    sfx_name - как раньше, просто с новым префиксом."""
+        - sounds:    sfx_name - как раньше, просто с новым префиксом.
+        - ambience:  ambience_name - имя файла с префиксом категории."""
         name = filename_to_var(fn)
         if cat in ('bg', 'cg'):
             return f"{self.RENPY_PREFIX[cat]} {name}"
@@ -357,6 +388,104 @@ class ResourceManager:
                 return cs
         return None
 
+    def _standalone_attr_words(self, character: str) -> set:
+        """Слова, которые для этого персонажа всегда должны быть отдельным
+        необязательным атрибутом (аксессуар вроде "panama"/"glasses"),
+        независимо от позиции far/close/normal - см.
+        composite_sprite_parser.get_standalone_attr_words. Считается один
+        раз по ВСЕМ объявлениям персонажа (по всем позициям), чтобы
+        поведение было одинаковым для far/close/normal."""
+        combos = [cs.variant_parts for cs in self.composite_sprites if cs.character == character]
+        manual_words = self.composite_exceptions.get(character)
+        return get_standalone_attr_words(character, combos, manual_words)
+
+    def get_composite_attr_groups(self, character: str, position: str) -> List[AttrGroup]:
+        """Разбивает атрибуты составных спрайтов персонажа/позиции на
+        отдельные НЕЗАВИСИМЫЕ группы (колонки) - как группы в layeredimage,
+        а не смешивая всё в одну кучу:
+
+        - "обычные" атрибуты группируются по их ПОЗИЦИИ внутри
+          variant_parts (после вычитания слов-исключений, см. ниже) - т.е.
+          в "dv normal pioneer far" слово "normal" (индекс 0, эмоция) и
+          слово "pioneer" (индекс 1, одежда) - это два разных атрибута;
+        - слова-исключения (см. _standalone_attr_words) - явно заданные
+          вручную ИЛИ автоопределённые как "необязательный аксессуар,
+          вставленный посередине имени и сбивающий позиционный счёт" (типа
+          "panama"/"glasses") - выносятся в отдельную, ДОПОЛНИТЕЛЬНУЮ
+          (необязательную) группу в конце: её можно не выбирать вовсе.
+        """
+        sprites = [cs for cs in self.composite_sprites
+                   if cs.character == character and cs.position == position]
+        extra_words = self._standalone_attr_words(character)
+
+        core_combos = [[w for w in cs.variant_parts if w not in extra_words] for cs in sprites]
+        max_len = max((len(c) for c in core_combos), default=0)
+        per_index: List[set] = [set() for _ in range(max_len)]
+        for c in core_combos:
+            for i, word in enumerate(c):
+                per_index[i].add(word)
+        groups = [AttrGroup(words=sorted(s), optional=False) for s in per_index]
+
+        extra_present = sorted({w for cs in sprites for w in cs.variant_parts if w in extra_words})
+        if extra_present:
+            groups.append(AttrGroup(words=extra_present, optional=True))
+        return groups
+
+    def find_composite_by_attr_selection(self, character: str, position: str,
+                                          selected: List[Optional[str]],
+                                          groups: List[AttrGroup]) -> Optional[CompositeSprite]:
+        """Точное совпадение по выбранным атрибутам (по одному слову на
+        группу, необязательные группы можно не выбирать) - как и раньше,
+        только реально объявленные в sprites.rpy комбинации валидны, без
+        учёта порядка слов внутри variant_parts (это важно для
+        необязательных аксессуаров вроде "panama", которые в реальном
+        имени стоят ПОСЕРЕДИНЕ, а не в конце)."""
+        for word, group in zip(selected, groups):
+            if word is None and not group.optional:
+                return None
+        chosen = {w for w in selected if w is not None}
+        for cs in self.composite_sprites:
+            if cs.character == character and cs.position == position and set(cs.variant_parts) == chosen:
+                return cs
+        return None
+
+    def find_composite_with_word(self, character: str, position: str, word: str) -> Optional[CompositeSprite]:
+        """Любой составной спрайт персонажа/позиции, содержащий данное слово
+        (в любой позиции variant_parts) - используется, чтобы показать в
+        карточке атрибута превью ВСЕГО спрайта (а не только различающегося
+        слоя)."""
+        for cs in self.composite_sprites:
+            if cs.character == character and cs.position == position and word in cs.variant_parts:
+                return cs
+        return None
+
+    def get_compatible_words(self, character: str, position: str, groups: List[AttrGroup],
+                              selected_attrs: List[Optional[str]], group_index: int) -> set:
+        """Слова внутри группы group_index, для которых существует хотя бы
+        один реально объявленный в sprites.rpy составной спрайт, содержащий
+        ОДНОВРЕМЕННО это слово И все атрибуты, уже выбранные в ДРУГИХ
+        группах. Используется, чтобы подсветить в UI, какие сочетания
+        атрибутов вообще существуют - например если пользователь выбрал
+        "dress" в одной группе, а в другой группе есть "grin", для которого
+        нет спрайта "grin"+"dress" (только "grin"+"pioneer") - "grin"
+        подсвечивается как несовместимый с текущим выбором."""
+        if group_index >= len(groups):
+            return set()
+        words_in_group = set(groups[group_index].words)
+        others_selected = [w for gi, w in enumerate(selected_attrs) if gi != group_index and w is not None]
+        if not others_selected:
+            return words_in_group
+        compatible = set()
+        for cs in self.composite_sprites:
+            if cs.character != character or cs.position != position:
+                continue
+            vp = set(cs.variant_parts)
+            if all(w in vp for w in others_selected):
+                for word in words_in_group:
+                    if word in vp:
+                        compatible.add(word)
+        return compatible
+
     def resolve_layer_path(self, rel_path: str, source: str = "custom") -> str:
         """Абсолютный путь к файлу слоя составного спрайта (rel_path -
         относительно <source>/sprites/, например 'far/cs/cs_1_body.png').
@@ -426,4 +555,5 @@ class ResourceManager:
             lines.append("# Ren'Py, отдельных image здесь не нужно (для default и custom")
             lines.append("# источников одинаково).")
             lines.append("")
+
         return "\n".join(lines)

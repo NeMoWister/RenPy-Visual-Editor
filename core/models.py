@@ -70,12 +70,7 @@ PRESET_POSITIONS = {
     "center-right": SpritePosition(0.65, 1.0),
     "right":        SpritePosition(0.8, 1.0),
 }
-
-                                                                   
-                                                                     
-                                                                     
-                                                                       
-                                               
+                                      
 NAMED_SPRITE_POSITIONS = {
     "fleft":  SpritePosition(0.16, 1.0),
     "left":   SpritePosition(0.28, 1.0),
@@ -86,10 +81,7 @@ NAMED_SPRITE_POSITIONS = {
     "right":  SpritePosition(0.72, 1.0),
     "fright": SpritePosition(0.84, 1.0),
 }
-
-                                                                             
-                                                                               
-                                                                                
+                                                                     
 ANCHOR_POSITIONS = [
     ("fleft",  "fleft - крайний левый край"),
     ("left",   "left - левее центра"),
@@ -131,12 +123,7 @@ class SceneNode:
     sprite_expression: Optional[str] = None
     sprite_position: SpritePosition = field(default_factory=SpritePosition)
     sprite_tag: Optional[str] = None
-    atl_script: str = ""
-                                                                       
-                                                                          
-                                                                           
-                                                                          
-                                                                               
+    atl_script: str = ""                                                          
     hide_group: Optional[str] = None
     music_var: Optional[str] = None
     sound_var: Optional[str] = None
@@ -150,11 +137,7 @@ class SceneNode:
     menu_prompt: str = ""
     menu_choices: List[tuple] = field(default_factory=list)
     comment_text: str = ""
-                                                                     
-                                                 
-    window_action: str = "show"                   
-                                                                            
-                                                                          
+    window_action: str = "show"
     ambience_var: Optional[str] = None
     ambience_fadein: float = 0.0
     ambience_fadeout: float = 0.0
@@ -162,19 +145,10 @@ class SceneNode:
     custom_template_id: str = ""
     custom_params: dict = field(default_factory=dict)
     pos_x: Optional[float] = None
-    pos_y: Optional[float] = None
-                                                                           
-                                                                      
-                                                                   
-                                                                       
-                                                                    
-    import_warning: str = ""
-                                                                         
-                                                                      
+    pos_y: Optional[float] = None                                         
+    import_warning: str = ""                                  
     nvl_action: str = "enter"
-                                                                       
-                                                                      
-
+    
     def normalized_menu_choices(self):
         """Возвращает menu_choices в едином виде (text, jump, use_call, raw_body, nodes),
         совместимо со старым форматом (2- и 3-элементные кортежи без raw_body/nodes).

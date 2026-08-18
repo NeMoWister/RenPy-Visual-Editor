@@ -444,11 +444,7 @@ def clone(url: str, dest_dir: str, token: Optional[str] = None) -> Tuple[bool, s
     parent = os.path.dirname(dest_dir.rstrip("/\\")) or "."
     name = os.path.basename(dest_dir.rstrip("/\\"))
     return _run(["clone", clone_url, name], parent, timeout=120)
-
-
-                                                              
-                                    
-                                                              
+                                                   
 
 @dataclass
 class TagInfo:
@@ -515,10 +511,6 @@ def push_all_tags(repo_dir: str, token: Optional[str] = None, remote: str = "ori
     push_url = _inject_token(url, token) if token else url
     return _run(["push", push_url, "--tags"], repo_dir, timeout=120)
 
-
-                                                              
-                             
-                                                              
 
 def is_lfs_available() -> bool:
     git_exe = resolve_git_executable()
@@ -596,11 +588,7 @@ def lfs_untrack(repo_dir: str, patterns: List[str]) -> Tuple[bool, str]:
 def lfs_status(repo_dir: str) -> str:
     ok, out = _run(["lfs", "status"], repo_dir)
     return out if ok else f"Ошибка: {out}"
-
-
-                                                              
-                                       
-                                                              
+                                    
 
 @dataclass
 class GraphCommit:

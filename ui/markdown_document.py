@@ -32,13 +32,7 @@ import struct
 from typing import Dict, Optional
 
 from PyQt6.QtWidgets import QTextBrowser
-
-                                                                      
-                                                                         
-                           
 CONTAINER_WIDTH_PX = 900
-                                                                      
-                                                                      
 MAX_NATURAL_WIDTH_PX = 900
 
 
@@ -61,11 +55,6 @@ PALETTE = {
 
 BASE_FONT_SIZE_PT = 10.5
 CODE_FONT_FAMILIES = "Consolas, 'Courier New', monospace"
-
-                                                                  
-                                                                       
-                                                                           
-                                                            
 _PLACEHOLDER_RE = re.compile(r'\{\{(?P<key>[a-zA-Z_][a-zA-Z0-9_]*)\}\}')
 
 
@@ -181,9 +170,7 @@ def _png_size(data_uri: str) -> Optional[tuple]:
         return (w, h)
     except Exception:
         return None
-
-
-                                                                              
+    
 _IMG_TAG_RE = re.compile(r'<img\b([^>]*)>', re.IGNORECASE)
 _ATTR_RE = re.compile(r'(\w+)\s*=\s*"([^"]*)"')
 
@@ -218,9 +205,6 @@ def _fix_image_dimensions(html: str) -> str:
                 disp_w = min(nat_w, MAX_NATURAL_WIDTH_PX)
 
         disp_h = round(disp_w * nat_h / nat_w)
-
-                                                                      
-                                                           
         rest = _ATTR_RE.sub(
             lambda am: "" if am.group(1).lower() in ("width", "height")
             else am.group(0),
@@ -232,12 +216,6 @@ def _fix_image_dimensions(html: str) -> str:
 
     return _IMG_TAG_RE.sub(_fix_one, html)
 
-
-                                                                       
-                                                                          
-                                                                        
-                                                                      
-                                                             
 _P_ONLY_IMG_RE = re.compile(
     r'<p\b([^>]*)>\s*(<img\b[^>]*>)\s*</p>', re.IGNORECASE
 )

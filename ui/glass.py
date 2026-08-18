@@ -69,7 +69,7 @@ class AmbientGlassFrame(QFrame):
 
     def refresh_glass(self):
         """Пересчитать размытую подложку из текущего состояния источника.
-        Вызывать явно после того, как контент источника изменился.""" 
+        Вызывать явно после того, как контент источника изменился."""   
         src = self._source
         if src is None or src.width() <= 0 or src.height() <= 0:
             self._cached = None

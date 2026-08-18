@@ -9,7 +9,7 @@ from typing import Dict, Optional
 
 from core.unified_config import load_section, save_section
 
-                                                                         
+        
 _ACTION_KEYS = OrderedDict([
     ("add_dialogue",     ("hotkey.add_dialogue",     "Ctrl+1")),
     ("add_narration",    ("hotkey.add_narration",    "Ctrl+2")),

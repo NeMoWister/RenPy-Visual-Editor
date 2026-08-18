@@ -10,7 +10,7 @@ from core.i18n import tr, plural
 
 class ResourceUsageDialog(QDialog):
     """Список мест использования одного ресурса ('где используется') с
-    переходом к конкретной ноде - двойной клик или кнопка "Перейти".""" 
+    переходом к конкретной ноде - двойной клик или кнопка "Перейти"."""   
     navigate_requested = pyqtSignal(str, list, str)                                     
 
     def __init__(self, var_name: str, display_name: str, refs: list[UsageRef], parent=None):

@@ -36,11 +36,7 @@ event/function/on/contains и т.п.) сохраняется как ATLRaw - н�
 import re
 from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Tuple, Union
-
-
-                                                                              
-                                    
-                                                                              
+                                                              
 
 PROP_KEYS = {
     "xalign", "yalign", "xpos", "ypos", "xanchor", "yanchor",
@@ -105,10 +101,6 @@ ATLStmt = Union[ATLSet, ATLInterpolate, ATLPause, ATLImage, ATLWith,
 class ATLBlock:
     statements: List[ATLStmt] = field(default_factory=list)
 
-
-                                                                              
-                                        
-                                                                              
 
 _PROP_TOKEN_RE = re.compile(r'([a-zA-Z_]+)\s*(\([^)]*\)|[-+]?\d+\.?\d*)')
 _NUM_RE = re.compile(r'[-+]?\d+\.?\d*')
@@ -237,10 +229,6 @@ def parse_atl_text(text: str) -> ATLBlock:
     return _parse_block(tokens, 0, len(tokens), base_indent)
 
 
-                                                                              
-                                                  
-                                                                              
-
 @dataclass
 class Segment:
     t0: float
@@ -297,9 +285,7 @@ def compile_block(block: ATLBlock, base_state: Dict[str, object]) -> CompiledTim
             if sub.segments:
                 state = dict(sub.segments[-1].state_to)
             t += sub.total
-            if sub.has_loop:
-                                                                            
-                                                          
+            if sub.has_loop:                               
                 break
             continue
 
@@ -334,9 +320,7 @@ def compile_block(block: ATLBlock, base_state: Dict[str, object]) -> CompiledTim
             state = dict(state)
             state['__transition__'] = stmt.transition
             segments.append(Segment(t, t, 'hold', dict(state), dict(state)))
-            continue
-
-                                                                       
+            continue                                              
         continue
 
     total = t
@@ -394,10 +378,6 @@ def evaluate(tl: CompiledTimeline, t: float) -> Dict[str, object]:
             result[k] = v
     return result
 
-
-                                                                              
-                                                
-                                                                              
 
 REF_W = 1920.0
 REF_H = 1080.0

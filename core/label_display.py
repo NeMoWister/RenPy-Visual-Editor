@@ -52,7 +52,7 @@ def get_cg_label_mode() -> str:
 
 def apply_settings(app_settings):
     """Инициализирует все три режима из AppSettings разом (см. main.py,
-    аналогично init_translator(app_settings.language))."""
+    аналогично init_translator(app_settings.language))."""                                    
     set_bg_label_mode(getattr(app_settings, "bg_label_mode", MODE_FULL))
     set_show_label_mode(getattr(app_settings, "show_label_mode", MODE_FULL))
     set_cg_label_mode(getattr(app_settings, "cg_label_mode", MODE_FULL))

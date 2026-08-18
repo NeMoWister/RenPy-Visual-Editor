@@ -32,9 +32,7 @@ except ImportError:
     jinja2 = None
     JINJA2_AVAILABLE = False
 
-
-                                                                      
-                                                                     
+                                                  
 DEFAULT_TEMPLATES: Dict[str, str] = {
     "dialogue": '{{ pad }}{% if character_var %}{{ character_var }} {% endif %}"{{ text }}"',
     "narration": '{{ pad }}"{{ text }}"',

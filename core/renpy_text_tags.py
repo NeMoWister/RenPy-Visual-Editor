@@ -171,6 +171,6 @@ def runs_to_html(runs: List[TextRun], base_size: int = 15) -> str:
 
 def strip_tags(raw: str) -> str:
     """Просто убирает все теги, оставляя видимый текст (для мест, где рич-
-    рендеринг не нужен - списки, статистика, backlog и т.п.)."""      
+    рендеринг не нужен - списки, статистика, backlog и т.п.)."""                  
     runs, _ = parse_renpy_text(raw)
     return "".join(r.text for r in runs)

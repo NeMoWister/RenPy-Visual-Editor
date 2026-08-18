@@ -13,27 +13,12 @@ from core.unified_config import load_section, save_section
 @dataclass
 class AppSettings:
     check_updates_on_startup: bool = True
-                                                                         
-                                                                   
-                              
-    last_update_check: str = ""
-                                                                       
-                                                                      
-                                                                    
-    skipped_version: str = ""
-                                                                       
-                                                                      
-                                                                
+    last_update_check: str = ""                                                    
+    skipped_version: str = ""                                                        
     window_geometry: str = ""
     window_state: str = ""
     autosave_enabled: bool = True
-    autosave_interval_sec: int = 180
-                                                                         
-                                                                   
-                                                                      
-                                                                    
-                                                                     
-                                  
+    autosave_interval_sec: int = 180                          
     nvl_codegen_style: str = "character"
     language: str = "ru"
     theme: str = "ember"

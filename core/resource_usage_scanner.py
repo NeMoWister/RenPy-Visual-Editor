@@ -13,9 +13,7 @@ var_name -> список мест использования с "хлебным�
 from dataclasses import dataclass, field
 from typing import Dict, List, Tuple
 from core.models import Project, SceneNode, NodeType
-
-                                                                          
-                                                              
+                                          
 BranchPath = List[Tuple[str, int]]
 
 

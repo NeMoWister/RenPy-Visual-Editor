@@ -153,9 +153,9 @@ TRANSLATIONS = {
     "menu.project.resources": {"ru": "Настройки ресурсов...", "en": "Resource Settings..."},
     "menu.project.tags": {"ru": "Категории тегов (фоны/CG)...", "en": "Tag Categories (backgrounds/CG)..."},
     "menu.project.code_templates": {"ru": "Шаблоны пользовательских нод...", "en": "Custom Node Templates..."},
-    "menu.project.presentation": {"ru": "▶ Режим презентации", "en": "▶ Presentation Mode"},
-    "menu.project.timing": {"ru": "⏱ Проверка тайминга...", "en": "⏱ Timing Check..."},
-    "menu.project.spellcheck": {"ru": "🔤 Проверка реплик...", "en": "🔤 Spellcheck Lines..."},
+    "menu.project.presentation": {"ru": "Режим презентации", "en": "Presentation Mode"},
+    "menu.project.timing": {"ru": "Проверка тайминга...", "en": "Timing Check..."},
+    "menu.project.spellcheck": {"ru": "Проверка реплик...", "en": "Spellcheck Lines..."},
     "menu.project.import_paths": {"ru": "Импорт путей из .rpy...", "en": "Import Paths from .rpy..."},
     "menu.project.import_script": {"ru": "Импорт скрипта из .rpy...", "en": "Import Script from .rpy..."},
     "menu.project.screenplay": {
@@ -188,6 +188,11 @@ TRANSLATIONS = {
         "ru": "Экспорт defines ресурсов...",
         "en": "Export Resource Defines...",
     },
+    "menu.generation.export_project": {
+        "ru": "Экспорт проекта (сценарий + используемые ресурсы)...",
+        "en": "Export Project (script + used resources)...",
+    },
+    "menu.generation.export_project_short": {"ru": "Экспорт проекта", "en": "Export Project"},
 
                               
     "menu.stats": {"ru": "Статистика", "en": "Statistics"},
@@ -1493,6 +1498,62 @@ TRANSLATIONS = {
     "mw.export_title": {"ru": "Экспорт", "en": "Export"},
     "mw.no_scenes_to_export": {"ru": "В проекте нет ни одной сцены.", "en": "The project has no scenes."},
     "mw.export_script_title": {"ru": "Экспорт сценария", "en": "Export Script"},
+
+    "export_project.title": {"ru": "Экспорт проекта", "en": "Export Project"},    "export_project.dir_not_selected": {"ru": "Папка не выбрана", "en": "No folder selected"},
+    "export_project.pick_dir": {"ru": "Выбрать папку...", "en": "Choose Folder..."},
+    "export_project.pick_dir_title": {"ru": "Папка для экспорта проекта", "en": "Folder for Project Export"},
+    "export_project.split_box": {"ru": "Сценарий", "en": "Script"},
+    "export_project.rb_single": {"ru": "Один файл (script.rpy)", "en": "Single file (script.rpy)"},
+    "export_project.defines_box": {"ru": "Что включить в defines.rpy", "en": "What to include in defines.rpy"},
+    "export_project.cb_characters": {"ru": "Персонажи", "en": "Characters"},
+    "export_project.cb_transitions": {"ru": "Кастомные переходы", "en": "Custom transitions"},
+    "export_project.cb_resources": {
+        "ru": "Определения ресурсов (image/define для bg/cg/спрайтов/звуков)",
+        "en": "Resource defines (image/define for bg/cg/sprites/sounds)",
+    },
+    "export_project.summary_label": {"ru": "Что будет экспортировано:", "en": "What will be exported:"},
+    "export_project.summary_single_script": {"ru": "Сценарий: 1 файл (script.rpy)", "en": "Script: 1 file (script.rpy)"},
+    "export_project.summary_split_scripts": {
+        "ru": "Сценарий: {count} файл(ов)", "en": "Script: {count} file(s)",
+    },
+    "export_project.summary_defines": {"ru": "Определения: defines.rpy", "en": "Definitions: defines.rpy"},
+    "export_project.summary_assets": {
+        "ru": "Ресурсы для копирования (только используемые): {count}",
+        "en": "Resources to copy (used only): {count}",
+    },
+    "export_project.summary_missing": {
+        "ru": "Не найдены на диске ({count}) - НЕ будут скопированы:",
+        "en": "Not found on disk ({count}) - will NOT be copied:",
+    },
+    "export_project.summary_unresolved": {
+        "ru": "Использованы, но не найдены как ресурс ({count}):",
+        "en": "Used but not found as a resource ({count}):",
+    },
+    "export_project.note": {
+        "ru": "Файлы ресурсов копируются ровно по тем путям, что указаны в сгенерированном коде "
+              "(bg/..., cg/..., transitions/... и т.д.) - результат можно класть прямо в game/ Ren'Py проекта.",
+        "en": "Resource files are copied exactly to the paths referenced in the generated code "
+              "(bg/..., cg/..., transitions/... etc.) - the result can be dropped straight into a Ren'Py project's game/.",
+    },
+    "export_project.error_title": {"ru": "Ошибка экспорта", "en": "Export Error"},
+    "export_project.done_summary": {
+        "ru": "Экспортировано в:\n{path}\n\nФайлов сценария: {scripts}\nСкопировано ресурсов: {assets}",
+        "en": "Exported to:\n{path}\n\nScript files: {scripts}\nResources copied: {assets}",
+    },
+    "export_project.done_warning": {
+        "ru": "Не скопировано (нет файла на диске): {missing}\nНе найдено как ресурс: {unresolved}",
+        "en": "Not copied (missing on disk): {missing}\nNot found as a resource: {unresolved}",
+    },
+
+    "export_defines.title": {"ru": "Экспорт defines", "en": "Export Defines"},
+    "export_defines.what_box": {"ru": "Что включить", "en": "What to include"},
+    "export_defines.cb_used_only": {
+        "ru": "Только используемые в сценарии (иначе - все ресурсы проекта)",
+        "en": "Used in the script only (otherwise - all project resources)",
+    },
+    "export_defines.preview_label": {"ru": "Предпросмотр:", "en": "Preview:"},
+    "export_defines.save_as": {"ru": "Сохранить как...", "en": "Save As..."},
+    "export_defines.save_title": {"ru": "Сохранить defines.rpy", "en": "Save defines.rpy"},
     "mw.all_files2": {"ru": "Все файлы", "en": "All Files"},
     "mw.export_cancelled": {"ru": "Экспорт отменён", "en": "Export cancelled"},
     "mw.exported_label": {"ru": "Экспортировано: {path}", "en": "Exported: {path}"},
@@ -1715,6 +1776,11 @@ TRANSLATIONS = {
     },
     "ne.sprite_group": {"ru": "Спрайт", "en": "Sprite"},
     "ne.composite_sprites_label": {"ru": "Составные спрайты (sprites.rpy):", "en": "Composite Sprites (sprites.rpy):"},
+    "carousel.position_zoom_label": {"ru": "Позиция (масштаб)", "en": "Position (zoom)"},
+    "carousel.attributes_label": {"ru": "Атрибуты", "en": "Attributes"},
+    "carousel.attribute_n_label": {"ru": "Атрибут {n}", "en": "Attribute {n}"},
+    "carousel.attribute_n_optional_label": {"ru": "Атрибут {n} (необязательный)", "en": "Attribute {n} (optional)"},
+    "carousel.no_matching_sprite": {"ru": "Нет спрайта с таким набором атрибутов", "en": "No sprite matches this attribute set"},
     "ne.plain_sprites_label": {"ru": "Обычные спрайты (отдельные файлы):", "en": "Plain Sprites (individual files):"},
     "ne.no_sprite_files": {
         "ru": "Нет файлов в resources/sprites/. Разложите спрайты по папкам персонажей "

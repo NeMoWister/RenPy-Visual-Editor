@@ -187,8 +187,7 @@ def extract_peaks(path: str, num_buckets: int = 600, timeout_sec: float = 15.0) 
         result = _extract_peaks_wave(path, num_buckets)
         if result:
             return result
-                                                                     
-                                          
+
 
     result = _extract_peaks_miniaudio(path, num_buckets)
     if result:

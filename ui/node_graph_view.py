@@ -1363,9 +1363,7 @@ class NodeGraphCanvas(QWidget):
             self.minimap.refresh()
             return
 
-        nodes = self.scene.nodes
-                                                                                
-                                                                            
+        nodes = self.scene.nodes                          
         if all(n.pos_x is None for n in nodes):
             self._auto_layout_tree()
 
@@ -1376,10 +1374,6 @@ class NodeGraphCanvas(QWidget):
                     if n.node_id in g.node_ids:
                         hidden_rows.add(i)
         visible_rows = [r for r in range(len(nodes)) if r not in hidden_rows]
-
-                                                                        
-                                                                            
-                                                                             
         last_x, last_y = LEFT_X, 20.0 - (NODE_H + GAP_Y)
         for r in visible_rows:
             node = nodes[r]

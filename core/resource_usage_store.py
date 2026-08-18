@@ -44,8 +44,7 @@ class ResourceUsageStore:
             "favorites": self.favorites,
             "recent": self.recent,
         })
-
-                                                                           
+                                                    
 
     def is_favorite(self, category: str, var_name: str) -> bool:
         return var_name in self.favorites.get(category, [])
@@ -59,7 +58,6 @@ class ResourceUsageStore:
         lst.append(var_name)
         return True
 
-                                                                             
 
     def touch_recent(self, category: str, var_name: str):
         """Отмечает ресурс как только что использованный (поднимает наверх)."""

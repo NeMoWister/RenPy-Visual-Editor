@@ -1,13 +1,11 @@
 from typing import List, Dict, Optional
-from .models import Project, Scene, SceneNode, NodeType, Character
+from .models import Project, Scene, SceneNode, NodeType, Character, nearest_anchor_name
 from .custom_node_templates import CustomNodeTemplateStore
 
 INDENT = "    "
 COMMENT_PREFIX = "#"
 
-                                                                          
-                                                                             
-                                                                              
+
 _GROUPABLE_TRANSITION_TYPES = {
     NodeType.SCENE, NodeType.SHOW_BG, NodeType.SHOW_CG,
     NodeType.SHOW_SPRITE, NodeType.WINDOW,
@@ -74,10 +72,12 @@ def _render_sprite_show_lines(node: SceneNode, pad: str) -> List[str]:
         lines.extend(_render_atl_lines(node.atl_script, pad))
         return lines
     pos = node.sprite_position
-    lines.append(f"{pad}{INDENT}xalign {pos.xalign:.2f}")
-    lines.append(f"{pad}{INDENT}yalign {pos.yalign:.2f}")
+    anchor_name = nearest_anchor_name(pos.xalign)
     if pos.zoom != 1.0:
+        lines[0] = f"{pad}show {spr}{expr} at {anchor_name}:"
         lines.append(f"{pad}{INDENT}zoom {pos.zoom:.2f}")
+    else:
+        lines[0] = f"{pad}show {spr}{expr} at {anchor_name}"
     return lines
 
 
@@ -303,13 +303,7 @@ def generate_node(node: SceneNode, indent: int = 1, active_sprites: Optional[Dic
         for ct, cj, use_call, raw_body, choice_nodes in node.normalized_menu_choices():
             ct = ct.replace('"', '\\"')
             lines.append(f'{pad}{INDENT}"{ct}":')
-            if choice_nodes:
-                                                                              
-                                                                        
-                                                                           
-                                                                          
-                                                                           
-                                                                   
+            if choice_nodes:                                                                                   
                 branch_sprites = dict(active_sprites) if active_sprites is not None else {}
                 branch_nvl = dict(nvl_state) if nvl_state is not None else {"on": False}
                 wrote_any = False

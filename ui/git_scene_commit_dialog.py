@@ -48,7 +48,7 @@ class _PartialCommitWorker(QThread):
 class GitScenePartialCommitDialog(QDialog):
     """Коммит только по выбранным сценам - остальные изменения остаются
     несохранёнными в истории (но никуда не пропадают из самого файла на
-    диске/в редакторе, см. core.git_scene_commit)."""            
+    диске/в редакторе, см. core.git_scene_commit)."""                                    
 
     def __init__(self, repo_dir: str, project_abs_path: str, relpath: str, parent=None):
         super().__init__(parent)

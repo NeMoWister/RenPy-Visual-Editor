@@ -1,22 +1,59 @@
                        
 import os
-from typing import List, Optional
+from typing import List, Optional, Dict
 from PyQt6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QLabel, QPushButton,
-    QScrollArea, QFrame, QComboBox, QLineEdit, QMessageBox
+    QScrollArea, QFrame, QComboBox, QLineEdit, QMessageBox, QSizePolicy
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QEvent
-from PyQt6.QtGui import QPixmap
+from PyQt6.QtGui import QPixmap, QPainter
 from core.resource_manager import ResourceEntry
 from core.i18n import tr
 from core.composite_sprite_parser import CompositeSprite
-from ui.pixmap_cache import get_scaled, get_composite
+from ui.pixmap_cache import get_scaled, get_composite, get_pixmap
 from ui.theme import theme_manager
 
 
 SCROLL_EXTRA = 14
-FAVORITES_LABEL = "\u2605 \u0418\u0437\u0431\u0440\u0430\u043d\u043d\u043e\u0435"
-RECENT_LABEL = "\U0001F551 \u041d\u0435\u0434\u0430\u0432\u043d\u0438\u0435"
+SMALL_CONTENT_ITEM_THRESHOLD = 1                                                                       
+
+
+def _apply_scroll_fill_alignment(layout, scroll_widget, item_count: int, small_content_width: int):
+    """Решает, прижимать ли scroll_widget к левому верхнему углу его ячейки
+    в layout и ограничивать его шириной содержимого (мало элементов, чтобы
+    не было пустого поля вокруг одной папки), или дать ему заполнять всю
+    доступную ширину панели (с горизонтальной прокруткой, когда элементов
+    много).
+
+    Обе настройки (maximumWidth и alignment) обязательно меняются ВМЕСТЕ:
+    если оставить maximumWidth ограниченным маленьким значением, виджет не
+    сможет заполнить панель, даже если сбросить alignment на "заполнять" -
+    maximumWidth это жёсткий потолок независимо от alignment. А без
+    явного alignment Qt центрирует единственный "stretch"-элемент
+    QHBoxLayout/QVBoxLayout, если он упирается в maximumWidth и не может
+    заполнить всю выделенную ему полосу - отсюда "уплывшая в середину"
+    одна папка, когда содержимого мало.
+
+    Раньше решение принималось сравнением content_max_width с
+    self.width() (доступной шириной панели) - но self.width() ненадёжен в
+    момент вызова: карусель часто создаётся и сразу же программно
+    переходит в нужную вложенную папку (select_by_var) ДО того, как
+    родительская панель успела её показать/разложить. Поэтому решение
+    принимается ПРОСТО по количеству элементов: считаем "мало" только
+    самый крайний случай (0-1 элемент, как одна папка персонажа) - тогда
+    ограничиваем ширину содержимым и прижимаем влево. Во всех остальных
+    случаях (2+ элементов) - снимаем ограничение ширины и всегда
+    заполняем всю доступную ширину."""
+    if item_count <= SMALL_CONTENT_ITEM_THRESHOLD:
+        scroll_widget.setMaximumWidth(small_content_width)
+        layout.setAlignment(scroll_widget, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+    else:
+        scroll_widget.setMaximumWidth(16777215)
+        layout.setAlignment(scroll_widget, Qt.AlignmentFlag(0))
+
+
+FAVORITES_LABEL = "\u2605\u0418\u0437\u0431\u0440\u0430\u043d\u043d\u043e\u0435"
+RECENT_LABEL = "\U0001F551\u041d\u0435\u0434\u0430\u0432\u043d\u0438\u0435"
 
 
 class DragOverlay(QLabel):
@@ -41,17 +78,45 @@ class DragOverlay(QLabel):
         self.show()
 
 
-class HWheelScrollArea(QScrollArea):
-    """QScrollArea, прокручиваемая колесом мыши по горизонтали (карусель
-    ресурсов широкая, но невысокая - вертикальная прокрутка тут не нужна)."""
+class HOnlyWheelScrollArea(QScrollArea):
+    """Только горизонтальная прокрутка колесом мыши, БЕЗ адаптивной логики
+    HWheelScrollArea. Используется для рядов карточек-атрибутов, где
+    вертикальной прокрутки внутри ряда быть не должно в принципе: если
+    полагаться на "vbar.maximum() > vbar.minimum()" (как в HWheelScrollArea),
+    то как только появляется горизонтальная полоса прокрутки (сама занимает
+    немного высоты вьюпорта), содержимое перестаёт помещаться по высоте на
+    пару пикселей - и колесо начинает крутить по вертикали вместо
+    горизонтали, хотя сама вертикальная полоса скрыта (AlwaysOff). Здесь же
+    прокрутка всегда идёт по горизонтали, без каких-либо условий."""
 
     def wheelEvent(self, event):
         delta = event.angleDelta().y() or event.angleDelta().x()
         if delta == 0:
             super().wheelEvent(event)
             return
-        bar = self.horizontalScrollBar()
-        bar.setValue(bar.value() - delta)
+        hbar = self.horizontalScrollBar()
+        hbar.setValue(hbar.value() - delta)
+        event.accept()
+
+
+class HWheelScrollArea(QScrollArea):
+    """QScrollArea, прокручиваемая колесом мыши: если есть что скроллить по
+    вертикали (обычная многострочная панель) - крутит вертикально как
+    обычно, иначе (широкие однострочные карусели/полосы атрибутов) крутит
+    по горизонтали, чтобы колесо мыши работало и на горизонтальных
+    элементах тоже."""
+
+    def wheelEvent(self, event):
+        delta = event.angleDelta().y() or event.angleDelta().x()
+        if delta == 0:
+            super().wheelEvent(event)
+            return
+        vbar = self.verticalScrollBar()
+        hbar = self.horizontalScrollBar()
+        if vbar.maximum() > vbar.minimum():
+            vbar.setValue(vbar.value() - delta)
+        else:
+            hbar.setValue(hbar.value() - delta)
         event.accept()
 
 
@@ -106,10 +171,6 @@ class ResourceCard(QFrame):
 
         ext = os.path.splitext(self.entry.filename)[1].lower()
         if ext in {'.png', '.jpg', '.jpeg', '.webp', '.bmp'}:
-                                                                               
-                                                                                
-                                                                             
-                                                                                   
             self.preview.setText("…")
             self.preview.setStyleSheet(self.preview.styleSheet() + "color:#555; font-size:11px;")
             self._needs_thumb = True
@@ -144,10 +205,6 @@ class ResourceCard(QFrame):
             self.preview.setStyleSheet("font-size:24px;")
 
     def _update_style(self):
-                                                                 
-                                                                        
-                                                                
-                                                         
         self.setProperty("selected", self.selected)
         self.style().unpolish(self)
         self.style().polish(self)
@@ -260,6 +317,7 @@ class CharacterGroupPicker(QWidget):
         outer.setSpacing(4)
 
         row = QHBoxLayout()
+        self.row_layout = row
         row.setContentsMargins(0, 0, 0, 0)
 
         self.scroll = HWheelScrollArea()
@@ -273,6 +331,7 @@ class CharacterGroupPicker(QWidget):
         self.container_layout.setContentsMargins(4, 0, 4, 0)
         self.container_layout.setSpacing(6)
         self.container_layout.addStretch()
+        self.scroll.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         self.scroll.setWidget(self.container)
         row.addWidget(self.scroll, 1)
         outer.addLayout(row)
@@ -312,9 +371,6 @@ class CharacterGroupPicker(QWidget):
 
         folders = list(self.rm.get_folders(self.category, "")) if self.rm else []
         if self.rm and self.category == "sprites":
-                                                                            
-                                                                       
-                                                    
             for character in self.rm.get_composite_characters():
                 if character not in folders:
                     folders.append(character)
@@ -331,6 +387,7 @@ class CharacterGroupPicker(QWidget):
         w = len(folders) * (self.thumb_size + 22) + 10
         self.container.setFixedWidth(max(w, 200))
         self.container.setFixedHeight(self.thumb_size + ResourceCard.LABEL_HEIGHT + 14)
+        _apply_scroll_fill_alignment(self.row_layout, self.scroll, len(folders), max(w, 200) + 12)
 
     def _on_folder_clicked(self, folder_name: str):
         self.selected_folder = folder_name
@@ -432,6 +489,7 @@ class FolderResourceCarousel(QWidget):
         outer.addLayout(self.breadcrumb_row)
 
         row = QHBoxLayout()
+        self.row_layout = row
         row.setContentsMargins(0, 0, 0, 0)
 
         self.scroll = HWheelScrollArea()
@@ -445,6 +503,7 @@ class FolderResourceCarousel(QWidget):
         self.container_layout.setContentsMargins(4, 0, 4, 0)
         self.container_layout.setSpacing(6)
         self.container_layout.addStretch()
+        self.scroll.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         self.scroll.setWidget(self.container)
         row.addWidget(self.scroll, 1)
 
@@ -458,8 +517,6 @@ class FolderResourceCarousel(QWidget):
         none_row.addWidget(self.btn_none)
         none_row.addStretch()
         outer.addLayout(none_row)
-
-                                                                             
 
     def set_resource_manager(self, rm, category: Optional[str] = None):
         self.rm = rm
@@ -485,9 +542,7 @@ class FolderResourceCarousel(QWidget):
 
     def get_selected(self) -> Optional[ResourceEntry]:
         return self.selected_entry
-
-                                                                             
-
+    
     def _current_path_str(self) -> str:
         return "/".join(self.current_path)
 
@@ -576,6 +631,7 @@ class FolderResourceCarousel(QWidget):
         w = count * (self.thumb_size + 22) + 10
         self.container.setFixedWidth(max(w, 200))
         self.container.setFixedHeight(self.thumb_size + ResourceCard.LABEL_HEIGHT + 14)
+        _apply_scroll_fill_alignment(self.row_layout, self.scroll, count, max(w, 200) + 12)
         self._schedule_thumbnails()
 
     def _schedule_thumbnails(self):
@@ -673,6 +729,7 @@ class ResourceCarousel(QWidget):
         outer.addLayout(self.nav_row)
 
         row = QHBoxLayout()
+        self.row_layout = row
         row.setContentsMargins(0, 0, 0, 0)
 
         self.scroll = HWheelScrollArea()
@@ -686,6 +743,7 @@ class ResourceCarousel(QWidget):
         self.container_layout.setContentsMargins(4, 0, 4, 0)
         self.container_layout.setSpacing(6)
         self.container_layout.addStretch()
+        self.scroll.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         self.scroll.setWidget(self.container)
         row.addWidget(self.scroll, 1)
 
@@ -700,8 +758,6 @@ class ResourceCarousel(QWidget):
         none_row.addStretch()
         outer.addLayout(none_row)
 
-                                                                          
-
     def _reload_group_options(self):
         """Заполняет список категорий тегов в комбобоксе. Показывает только
         категории, у которых хотя бы один ресурс из текущего набора entries
@@ -709,13 +765,8 @@ class ResourceCarousel(QWidget):
         if not self.tags_store or not self.tags_store.categories:
             self.group_label.setVisible(False)
             self.group_combo.setVisible(False)
-            return
-
-                                                                              
+            return                 
         entry_vars = {e.var_name for e in self.entries} if self.entries else set()
-
-                                                                             
-                                                                             
         visible_cats = []
         for cat in self.tags_store.categories:
             if any(
@@ -787,16 +838,10 @@ class ResourceCarousel(QWidget):
             self.nav_row.addWidget(sep)
         self.nav_row.addStretch()
 
-                                                                           
-
     def set_entries(self, entries: List[ResourceEntry]):
         self.entries = entries
         self.selected_entry = None
         self.current_tag = None
-                                                                            
-                                                                        
-                                                                        
-                                                                          
         prev_group = self.group_category_id or self._pending_initial_group_id
         self._pending_initial_group_id = None
         self._reload_group_options()                                       
@@ -808,10 +853,6 @@ class ResourceCarousel(QWidget):
                 self.group_combo.blockSignals(False)
                 self.group_category_id = prev_group
             else:
-                                                                         
-                                                                      
-                                                                        
-                                                                            
                 self.group_category_id = None
         else:
             self.group_category_id = None
@@ -942,6 +983,7 @@ class ResourceCarousel(QWidget):
         w = count * (self.thumb_size + 22) + 10
         self.container.setFixedWidth(max(w, 200))
         self.container.setFixedHeight(self.thumb_size + ResourceCard.LABEL_HEIGHT + 14)
+        _apply_scroll_fill_alignment(self.row_layout, self.scroll, count, max(w, 200) + 12)
         self._schedule_thumbnails()
 
     def _schedule_thumbnails(self):
@@ -959,8 +1001,6 @@ class ResourceCarousel(QWidget):
                 try:
                     card.load_thumbnail()
                 except RuntimeError:
-                                                                         
-                                                                 
                     pass
             if pending:
                 QTimer.singleShot(0, step)
@@ -1010,8 +1050,6 @@ class ResourceCarousel(QWidget):
                     self.current_tag = tag_text
                     break
         self._render()
-
-                                                                        
 
     def dragEnterEvent(self, event):
         if self.rm and self.category and event.mimeData().hasUrls():
@@ -1063,23 +1101,31 @@ class ResourceCarousel(QWidget):
         event.acceptProposedAction()
 
 
-class CompositeSpriteCard(QFrame):
-    """Карточка составного спрайта (sprites.rpy): миниатюра - это все его
-    слои, наложенные друг на друга, как в самой игре, а не один файл."""
-    clicked = pyqtSignal(object)
+class CompositeAttrCard(QFrame):
+    """Карточка одного атрибута составного спрайта (sprites.rpy): миниатюра -
+    это ВЕСЬ спрайт целиком (все слои наложены друг на друга, как в игре),
+    а не только различающийся слой - в отличие от старого поведения, где
+    показывался один файл. Картинка берётся у любого объявленного составного
+    спрайта персонажа/позиции, содержащего этот атрибут (representative)."""
+    clicked = pyqtSignal(int, str)                             
 
     LABEL_HEIGHT = ResourceCard.LABEL_HEIGHT
 
-    def __init__(self, sprite: CompositeSprite, rm, thumb_size: int = 160):
+    def __init__(self, group_index: int, word: str, representative: Optional[CompositeSprite], rm, thumb_size: int = 96):
         super().__init__()
-        self.sprite = sprite
+        self.group_index = group_index
+        self.word = word
+        self.representative = representative
         self.rm = rm
         self.selected = False
+        self.compatible = True
         self.thumb_size = thumb_size
         self.setFixedSize(thumb_size + 16, thumb_size + self.LABEL_HEIGHT + 14)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setObjectName("resource_card")
         self._needs_thumb = True
+        self._base_pixmap: Optional[QPixmap] = None                                    
+        self._dimmed_pixmap: Optional[QPixmap] = None                                            
         self._setup_ui(thumb_size)
 
     def _setup_ui(self, thumb_size: int):
@@ -1095,11 +1141,12 @@ class CompositeSpriteCard(QFrame):
         self.preview.setStyleSheet(self.preview.styleSheet() + "color:#555; font-size:11px;")
         layout.addWidget(self.preview)
 
-        name_label = QLabel(self.sprite.display_name)
+        name_label = QLabel(self.word)
         name_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         name_label.setWordWrap(True)
         name_label.setObjectName("hint_text")
         name_label.setMaximumWidth(thumb_size + 8)
+        self.name_label = name_label
         layout.addWidget(name_label)
         self._update_style()
 
@@ -1107,25 +1154,54 @@ class CompositeSpriteCard(QFrame):
         if not self._needs_thumb:
             return
         self._needs_thumb = False
+        if self.representative is None:
+            self.preview.setText("❓")
+            self.preview.setStyleSheet("font-size:24px;")
+            return
+        sprite = self.representative
         layers = [
-            (self.rm.resolve_layer_path(layer.rel_path, self.sprite.source), layer.offset_x, layer.offset_y)
-            for layer in self.sprite.layers
+            (self.rm.resolve_layer_path(layer.rel_path, sprite.source), layer.offset_x, layer.offset_y)
+            for layer in sprite.layers
         ]
-        pm = get_composite(layers, self.sprite.width, self.sprite.height,
+        pm = get_composite(layers, sprite.width, sprite.height,
                             target_w=self.thumb_size, target_h=self.thumb_size)
         if pm is not None:
-            self.preview.setPixmap(pm)
-            self.preview.setObjectName("code_box")
+            self._base_pixmap = pm
+            self._dimmed_pixmap = None
+            self._apply_current_pixmap()
         else:
             self.preview.setText("🖼")
-            self.preview.setObjectName("code_box")
             self.preview.setStyleSheet("font-size:24px;")
 
+    def _apply_current_pixmap(self):
+        """Выставляет в preview либо обычный, либо приглушённый (для
+        несовместимых с текущим выбором атрибутов) вариант картинки -
+        приглушение "запечено" прямо в отдельный QPixmap заранее, БЕЗ
+        QGraphicsOpacityEffect: у него в PyQt/Qt есть известная проблема с
+        кэшированием превью внутри вложенных QScrollArea - виджет может
+        "уплыть", наложиться на соседние или временно пропасть вплоть до
+        наведения мыши (которое форсирует перерисовку). Прямая подмена
+        QPixmap в QLabel лишена этой проблемы."""
+        if self._base_pixmap is None:
+            return
+        if self.compatible:
+            self.preview.setPixmap(self._base_pixmap)
+            return
+        if self._dimmed_pixmap is None:
+            self._dimmed_pixmap = self._make_dimmed(self._base_pixmap)
+        self.preview.setPixmap(self._dimmed_pixmap)
+
+    @staticmethod
+    def _make_dimmed(pixmap: QPixmap) -> QPixmap:
+        dimmed = QPixmap(pixmap.size())
+        dimmed.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(dimmed)
+        painter.setOpacity(0.32)
+        painter.drawPixmap(0, 0, pixmap)
+        painter.end()
+        return dimmed
+
     def _update_style(self):
-                                                                 
-                                                                        
-                                                                
-                                                         
         self.setProperty("selected", self.selected)
         self.style().unpolish(self)
         self.style().polish(self)
@@ -1134,8 +1210,23 @@ class CompositeSpriteCard(QFrame):
         self.selected = val
         self._update_style()
 
+    def set_compatible(self, compatible: bool):
+        """Визуально подсвечивает (приглушает), совместим ли этот атрибут с
+        уже выбранными атрибутами в ДРУГИХ группах - т.е. существует ли
+        вообще реально объявленный спрайт, где они встречаются вместе.
+        Например если выбран "dress", а для "grin" в паре с "dress" такого
+        спрайта нет (только "grin"+"pioneer") - "dress" в своей группе
+        останется обычным, а несовместимые с ним варианты в других группах
+        приглушаются, чтобы сразу было видно, какие сочетания вообще
+        существуют."""
+        if self.compatible == compatible:
+            return
+        self.compatible = compatible
+        self._apply_current_pixmap()
+        self.name_label.setStyleSheet("" if compatible else "color:#666;")
+
     def mousePressEvent(self, event):
-        self.clicked.emit(self.sprite)
+        self.clicked.emit(self.group_index, self.word)
         super().mousePressEvent(event)
 
 
@@ -1146,12 +1237,24 @@ POSITION_LABELS = _position_labels
 
 
 class CompositeSpriteCarousel(QWidget):
-    """Навигация по составным спрайтам из resources/sprites/sprites.rpy:
-    персонаж -> позиция (far/close/normal) -> эмоция/состав, с наложенными
-    превью на конечном уровне. Используется наравне с FolderResourceCarousel
-    для обычных папочных спрайтов - какая из карусели показывается, решает
-    node_editor в зависимости от того, есть ли составные спрайты вообще."""
+    """Навигация по составным спрайтам персонажей, объявленным в
+    resources/<source>/sprites/sprites.rpy: персонаж -> позиция
+    (far/close/normal, если у персонажа их несколько) -> НЕСКОЛЬКО рядов
+    карточек-атрибутов (как группы в layeredimage) - каждый ряд это
+    отдельный, независимый атрибут (например эмоция ИЛИ одежда), а не все
+    слова вперемешку. Внутри ряда выбор одиночный (один атрибут на группу),
+    между рядами - независимо. Плюс большое превью итогового составного
+    спрайта. В отличие от layeredimage, атрибуты здесь НЕ комбинируются
+    произвольно - только точные комбинации, реально объявленные в
+    sprites.rpy, дают валидный (выбираемый) результат; всё остальное
+    берётся из файла и никогда не додумывается/не генерируется.
+    """
     selection_changed = pyqtSignal(object)                          
+    browsing_changed = pyqtSignal(bool)
+
+    PREVIEW_SIZE = 220
+    SWATCH_SIZE = 96
+    DEFAULT_POSITION = "normal"
 
     def __init__(self, resource_manager=None, thumb_size: int = 160):
         super().__init__()
@@ -1160,6 +1263,11 @@ class CompositeSpriteCarousel(QWidget):
         self.current_path: List[str] = []                            
         self.cards: List[QWidget] = []
         self.selected_sprite: Optional[CompositeSprite] = None
+        self.selected_attrs: List[Optional[str]] = []                                                     
+        self.groups: List = []                                                    
+        self.selected_position: str = self.DEFAULT_POSITION
+        self.position_buttons: Dict[str, QPushButton] = {}
+        self.preview_label: Optional[QLabel] = None
         self._setup_ui()
 
     def _setup_ui(self):
@@ -1168,27 +1276,26 @@ class CompositeSpriteCarousel(QWidget):
         outer.setSpacing(4)
 
         self.breadcrumb_row = QHBoxLayout()
-        self.breadcrumb_row.setContentsMargins(0, 0, 0, 0)
-        self.breadcrumb_row.setSpacing(4)
+        self.breadcrumb_row.setContentsMargins(0, 0, 0, 4)
         outer.addLayout(self.breadcrumb_row)
-
-        row = QHBoxLayout()
-        row.setContentsMargins(0, 0, 0, 0)
 
         self.scroll = HWheelScrollArea()
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.scroll.setFixedHeight(self.thumb_size + 52 + SCROLL_EXTRA)
-        self.scroll.setWidgetResizable(False)
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
 
         self.container = QWidget()
+        self.container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.container_layout = QHBoxLayout(self.container)
         self.container_layout.setContentsMargins(4, 0, 4, 0)
         self.container_layout.setSpacing(6)
         self.container_layout.addStretch()
+        self.scroll.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         self.scroll.setWidget(self.container)
-        row.addWidget(self.scroll, 1)
-        outer.addLayout(row)
+        outer.addWidget(self.scroll)
+        self.outer_layout = outer
 
         none_row = QHBoxLayout()
         self.btn_none = QPushButton(tr("carousel.clear_selection"))
@@ -1203,30 +1310,28 @@ class CompositeSpriteCarousel(QWidget):
         self.rm = rm
         self.current_path = []
         self.selected_sprite = None
+        self.selected_attrs = []
+        self.selected_position = self.DEFAULT_POSITION
         self._refresh_view()
 
     def select_by_name(self, full_name: str):
         """Находит составной спрайт по полному имени (как из image ...) и
-        сразу переходит в его персонажа/позицию, подсвечивая карточку."""
+        сразу переходит в его персонажа/позицию/атрибуты, подсвечивая их."""
         if not self.rm:
             return
         sprite = self.rm.find_composite_by_name(full_name)
         if sprite:
-            self.current_path = [sprite.character, sprite.position]
+            self.current_path = [sprite.character]
             self.selected_sprite = sprite
+            self.selected_attrs = list(sprite.variant_parts)
+            self.selected_position = sprite.position
         self._refresh_view()
 
     def get_selected(self) -> Optional[CompositeSprite]:
         return self.selected_sprite
 
-                                                                             
-
     def _go_to(self, path_parts: List[str]):
         self.current_path = list(path_parts)
-        self._refresh_view()
-
-    def _enter(self, part: str):
-        self.current_path.append(part)
         self._refresh_view()
 
     def _rebuild_breadcrumbs(self):
@@ -1238,9 +1343,6 @@ class CompositeSpriteCarousel(QWidget):
         crumbs = [("🏠 Спрайты", [])]
         if len(self.current_path) >= 1:
             crumbs.append((self.current_path[0], self.current_path[:1]))
-        if len(self.current_path) >= 2:
-            pos = self.current_path[1]
-            crumbs.append((_position_labels().get(pos, pos), self.current_path[:2]))
 
         for i, (text, path) in enumerate(crumbs):
             btn = QPushButton(text)
@@ -1266,12 +1368,11 @@ class CompositeSpriteCarousel(QWidget):
                 self.breadcrumb_row.addWidget(sep)
         self.breadcrumb_row.addStretch()
 
-    def _refresh_view(self):
-        self._rebuild_breadcrumbs()
-
+    def _clear_container(self):
         for card in self.cards:
             card.hide()
         self.cards.clear()
+        self.preview_label = None
         while self.container_layout.count():
             item = self.container_layout.takeAt(0)
             w = item.widget()
@@ -1279,51 +1380,217 @@ class CompositeSpriteCarousel(QWidget):
                 w.hide()
                 w.deleteLater()
 
+    def _refresh_view(self):
+        self._rebuild_breadcrumbs()
+        self._clear_container()
+
         if not self.rm:
-            self.container.setFixedWidth(200)
-            self.container.setFixedHeight(self.thumb_size + ResourceCard.LABEL_HEIGHT + 14)
+            self.scroll.setFixedHeight(self.thumb_size + 52 + SCROLL_EXTRA)
+            self.browsing_changed.emit(False)
             return
 
-        count = 0
         if len(self.current_path) == 0:
-                                  
-            for character in self.rm.get_composite_characters():
+            self.scroll.setWidgetResizable(False)
+            self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+            self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            self.scroll.setFixedHeight(self.thumb_size + 52 + SCROLL_EXTRA)
+            characters = self.rm.get_composite_characters()
+            for character in characters:
                 card = FolderCard(character, self.thumb_size)
-                card.clicked.connect(self._enter)
+                card.clicked.connect(self._on_character_clicked)
                 self.cards.append(card)
                 self.container_layout.addWidget(card)
-                count += 1
-        elif len(self.current_path) == 1:
-                                                                 
-            character = self.current_path[0]
-            for pos in self.rm.get_composite_positions(character):
-                card = FolderCard(_position_labels().get(pos, pos), self.thumb_size)
-                card.folder_name = pos                                                                 
-                card.clicked.connect(self._enter)
-                self.cards.append(card)
-                self.container_layout.addWidget(card)
-                count += 1
-        else:
-                                                                        
-            character, position = self.current_path[0], self.current_path[1]
-            for sprite in self.rm.get_composite_sprites(character, position):
-                card = CompositeSpriteCard(sprite, self.rm, self.thumb_size)
-                card.clicked.connect(self._on_card_clicked)
-                if self.selected_sprite and sprite.full_name == self.selected_sprite.full_name:
-                    card.set_selected(True)
-                self.cards.append(card)
-                self.container_layout.addWidget(card)
-                count += 1
+            self.container_layout.addStretch()
+            w = len(characters) * (self.thumb_size + 22) + 10
+            self.container.setMinimumWidth(max(w, 200))
+            self.container.setFixedHeight(self.thumb_size + ResourceCard.LABEL_HEIGHT + 14)
+            _apply_scroll_fill_alignment(self.outer_layout, self.scroll, len(characters), max(w, 200) + 12)
+            self.browsing_changed.emit(False)
+            return
 
-        self.container_layout.addStretch()
-        w = count * (self.thumb_size + 22) + 10
-        self.container.setFixedWidth(max(w, 200))
-        self.container.setFixedHeight(self.thumb_size + ResourceCard.LABEL_HEIGHT + 14)
+        character = self.current_path[0]
+        positions = self.rm.get_composite_positions(character)
+        if self.selected_position not in positions and positions:
+            self.selected_position = positions[0]
+
+        groups = self.rm.get_composite_attr_groups(character, self.selected_position)
+        # если у нас есть точно выбранный спрайт (например, после
+        # select_by_name или просто как результат текущего точного
+        # совпадения) - раскладываем его variant_parts по правильным
+        # индексам НОВЫХ групп (а не берём как есть - т.к. вставленный
+        # посередине необязательный аксессуар типа "panama" сдвигает
+        # порядок слов в самом объявлении относительно порядка групп в UI)
+        if self.selected_sprite is not None and self.selected_sprite.position == self.selected_position \
+                and self.selected_sprite.character == character:
+            remaining = list(self.selected_sprite.variant_parts)
+            new_attrs: List[Optional[str]] = [None] * len(groups)
+            for gi, group in enumerate(groups):
+                for w in remaining:
+                    if w in group.words:
+                        new_attrs[gi] = w
+                        remaining.remove(w)
+                        break
+            self.selected_attrs = new_attrs
+        elif len(self.selected_attrs) < len(groups):
+            self.selected_attrs = self.selected_attrs + [None] * (len(groups) - len(self.selected_attrs))
+        elif len(self.selected_attrs) > len(groups):
+            self.selected_attrs = self.selected_attrs[:len(groups)]
+
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.scroll.setMaximumWidth(16777215)                                                          
+        self.outer_layout.setAlignment(self.scroll, Qt.AlignmentFlag(0))                                                       
+
+        panel = QWidget()
+        panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        vlayout = QVBoxLayout(panel)
+        vlayout.setContentsMargins(4, 4, 4, 4)
+        vlayout.setSpacing(8)
+
+        top_row = QHBoxLayout()
+        top_row.setSpacing(10)
+
+        self.preview_label = QLabel()
+        self.preview_label.setFixedSize(self.PREVIEW_SIZE, self.PREVIEW_SIZE)
+        self.preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.preview_label.setObjectName("code_box")
+        top_row.addWidget(self.preview_label)
+
+        right_col = QVBoxLayout()
+        right_col.setSpacing(6)
+
+        if len(positions) > 1:
+            pos_label = QLabel(tr("carousel.position_zoom_label"))
+            pos_label.setObjectName("hint_text")
+            right_col.addWidget(pos_label)
+
+            pos_row = QHBoxLayout()
+            pos_row.setSpacing(6)
+            self.position_buttons = {}
+            labels = _position_labels()
+            for key in positions:
+                btn = QPushButton(labels.get(key, key))
+                btn.setCheckable(True)
+                btn.setChecked(key == self.selected_position)
+                btn.setObjectName("btn_secondary")
+                btn.setFixedHeight(36)
+                btn.clicked.connect(lambda _=None, k=key: self._on_position_clicked(k))
+                self.position_buttons[key] = btn
+                pos_row.addWidget(btn)
+            pos_row.addStretch()
+            right_col.addLayout(pos_row)
+
+        right_col.addStretch()
+        top_row.addLayout(right_col, 1)
+        vlayout.addLayout(top_row)
+
+        # каждая группа/индекс атрибута - СВОЙ отдельный подписанный ряд
+        # карточек (как группы в layeredimage), а не общая куча слов -
+        # т.к. "normal"/"grin" (эмоция) и "pioneer"/"swim" (одежда) это
+        # разные, независимо выбираемые атрибуты. Необязательные группы
+        # (аксессуары вроде "panama"/"glasses") помечены отдельно и их
+        # можно оставить невыбранными.
+        self.groups = groups
+        for gi, group in enumerate(groups):
+            if not group.words:
+                continue
+            label_key = "carousel.attribute_n_optional_label" if group.optional else "carousel.attribute_n_label"
+            row_label = QLabel(tr(label_key, n=gi + 1))
+            row_label.setObjectName("hint_text")
+            vlayout.addWidget(row_label)
+
+            row_scroll = HOnlyWheelScrollArea()
+            row_scroll.setWidgetResizable(False)
+            row_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+            row_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            card_height = self.SWATCH_SIZE + ResourceCard.LABEL_HEIGHT + 14
+            row_scroll.setFixedHeight(card_height + 18)
+
+            row_widget = QWidget()
+            row_layout = QHBoxLayout(row_widget)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.setSpacing(6)
+
+            selected_word = self.selected_attrs[gi] if gi < len(self.selected_attrs) else None
+            for word in group.words:
+                representative = self.rm.find_composite_with_word(character, self.selected_position, word)
+                card = CompositeAttrCard(gi, word, representative, self.rm, self.SWATCH_SIZE)
+                card.set_selected(word == selected_word)
+                card.clicked.connect(self._on_attr_clicked)
+                self.cards.append(card)
+                row_layout.addWidget(card)
+            row_scroll.setWidget(row_widget)
+            vlayout.addWidget(row_scroll)
+
+        vlayout.addStretch()
+        self.container_layout.addWidget(panel, 1)
+        self.container.setMinimumWidth(self.PREVIEW_SIZE + 40)
+
+        natural_height = panel.layout().sizeHint().height()
+        self.container.setMinimumHeight(natural_height + 10)
+        self.scroll.setFixedHeight(min(natural_height + 20, 560))
+
+        self._update_match()
         self._schedule_thumbnails()
+        self.browsing_changed.emit(True)
+
+    def _update_match(self):
+        """Пересчитывает, соответствует ли текущий набор выбранных
+        атрибутов (по одному на группу) + позиция реально объявленному
+        составному спрайту, и обновляет большое превью соответственно.
+        Если точного совпадения нет (в т.ч. не все группы ещё выбраны) -
+        составной спрайт не выбран (никаких придуманных комбинаций)."""
+        if not self.rm or not self.current_path:
+            return
+        character = self.current_path[0]
+        matched = self.rm.find_composite_by_attr_selection(character, self.selected_position, self.selected_attrs, self.groups)
+        self.selected_sprite = matched
+        self._update_compatibility_highlight()
+        if self.preview_label is None:
+            return
+        if matched is None:
+            self.preview_label.setText(tr("carousel.no_matching_sprite"))
+            self.preview_label.setStyleSheet("color:#888; font-size:11px;")
+            return
+        layers = [
+            (self.rm.resolve_layer_path(layer.rel_path, matched.source), layer.offset_x, layer.offset_y)
+            for layer in matched.layers
+        ]
+        pm = get_composite(layers, matched.width, matched.height,
+                            target_w=self.PREVIEW_SIZE, target_h=self.PREVIEW_SIZE)
+        if pm is not None:
+            self.preview_label.setPixmap(pm)
+            self.preview_label.setStyleSheet("")
+        else:
+            self.preview_label.setText("🖼")
+            self.preview_label.setStyleSheet("font-size:32px;")
+
+    def _update_compatibility_highlight(self):
+        """Подсвечивает (приглушает несовместимые), какие атрибуты в каждой
+        группе реально сочетаются с уже выбранными в ДРУГИХ группах - см.
+        ResourceManager.get_compatible_words. Если ни одного атрибута нигде
+        не выбрано - подсветка не нужна, все варианты равноценны."""
+        if not self.rm or not self.current_path or not self.groups:
+            return
+        character = self.current_path[0]
+        any_selected = any(a is not None for a in self.selected_attrs)
+        compat_cache: Dict[int, set] = {}
+        for card in self.cards:
+            if not isinstance(card, CompositeAttrCard):
+                continue
+            gi = card.group_index
+            if not any_selected:
+                card.set_compatible(True)
+                continue
+            if gi not in compat_cache:
+                compat_cache[gi] = self.rm.get_compatible_words(
+                    character, self.selected_position, self.groups, self.selected_attrs, gi)
+            card.set_compatible(card.word in compat_cache[gi])
 
     def _schedule_thumbnails(self):
-        pending = [c for c in self.cards if isinstance(c, CompositeSpriteCard)]
-        batch_size = 3                                                     
+        pending = [c for c in self.cards if isinstance(c, CompositeAttrCard)]
+        batch_size = 4
 
         def step():
             for _ in range(batch_size):
@@ -1339,16 +1606,50 @@ class CompositeSpriteCarousel(QWidget):
 
         QTimer.singleShot(0, step)
 
-    def _on_card_clicked(self, sprite: CompositeSprite):
+    def _on_character_clicked(self, character: str):
+        self.selected_sprite = None
+        self.selected_attrs = []
+        self.selected_position = self.DEFAULT_POSITION
+        self.current_path = [character]
+        self._refresh_view()
+        self.selection_changed.emit(self.selected_sprite)
+
+    def _on_position_clicked(self, key: str):
+        self.selected_position = key
+        for k, btn in self.position_buttons.items():
+            btn.setChecked(k == key)
+        self._refresh_view()
+        self.selection_changed.emit(self.selected_sprite)
+
+    def _on_attr_clicked(self, group_index: int, word: str):
+        if group_index >= len(self.selected_attrs):
+            self.selected_attrs.extend([None] * (group_index + 1 - len(self.selected_attrs)))
+        # клик по уже выбранной карточке снимает выбор этой группы,
+        # иначе - выбирает её (одиночный выбор внутри ряда/группы)
+        if self.selected_attrs[group_index] == word:
+            self.selected_attrs[group_index] = None
+        else:
+            self.selected_attrs[group_index] = word
         for card in self.cards:
-            if isinstance(card, CompositeSpriteCard):
-                card.set_selected(card.sprite is sprite)
-        self.selected_sprite = sprite
-        self.selection_changed.emit(sprite)
+            if isinstance(card, CompositeAttrCard) and card.group_index == group_index:
+                card.set_selected(card.word == self.selected_attrs[group_index])
+        self._update_match()
+        self.selection_changed.emit(self.selected_sprite)
 
     def _clear_selection(self):
-        for card in self.cards:
-            if isinstance(card, CompositeSpriteCard):
-                card.set_selected(False)
         self.selected_sprite = None
+        self.selected_attrs = []
+        self.selected_position = self.DEFAULT_POSITION
+        self.current_path = []
+        self._refresh_view()
         self.selection_changed.emit(None)
+
+    def reset_silent(self):
+        """Сбрасывает выбор БЕЗ испускания selection_changed - для случаев,
+        когда сброс инициирован выбором в ДРУГОЙ карусели (обычные папочные
+        спрайты), чтобы не было цикла обратных сбросов."""
+        self.selected_sprite = None
+        self.selected_attrs = []
+        self.selected_position = self.DEFAULT_POSITION
+        self.current_path = []
+        self._refresh_view()

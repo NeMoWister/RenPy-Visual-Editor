@@ -45,12 +45,7 @@ class ToggleSwitch(QAbstractButton):
         self._anim.start()
 
     def setChecked(self, checked: bool):
-        super().setChecked(checked)
-                                                                              
-                                                                             
-                                                                              
-                                                                            
-                                                                          
+        super().setChecked(checked)                                            
         if self.signalsBlocked():
             self._anim.stop()
             self._pos = 1.0 if checked else 0.0
@@ -226,10 +221,6 @@ class ValueSlider(QWidget):
 from core import atl as atl_engine
 from core.i18n import tr
 
-                                                                              
-                                          
-                                                                              
-
 PROP_DEFS: List[Tuple[str, str, float, float, float, float]] = [
                                                                      
     ("xalign", "atl_steps.prop_xalign", 0.5, -3.0, 3.0, 0.01),
@@ -262,10 +253,6 @@ def new_initial_step(base_xalign: float, base_yalign: float, base_zoom: float) -
     st.values.update({"xalign": base_xalign, "yalign": base_yalign, "zoom": base_zoom})
     return st
 
-
-                                                                              
-                                                       
-                                                                              
 
 def steps_to_atl_text(steps: List[AtlStep], repeat: bool, repeat_count: Optional[int] = None) -> str:
     if not steps:
@@ -340,11 +327,7 @@ def steps_from_atl_text(text: str, base_xalign: float, base_yalign: float,
         else:
             lossy = True
     return steps, repeat, repeat_count, lossy
-
-
-                                                                              
-                                        
-                                                                              
+                            
 
 class _StepTimeline(QWidget):
     """Горизонтальная шкала времени с ромбовидными маркерами шагов -
@@ -442,11 +425,7 @@ class _StepTimeline(QWidget):
 
     def mouseReleaseEvent(self, event: QMouseEvent):
         self._dragging = None
-
-
-                                                                              
-                                                       
-                                                                              
+                                
 
 class AtlStepsPanel(QWidget):
     """Собранная воедино панель: таймлайн + список тумблеров свойств для
@@ -540,9 +519,6 @@ class AtlStepsPanel(QWidget):
 
         self._refresh_all()
 
-                                                                              
-                                                                            
-                                                                              
 
     def set_base(self, base_xalign: float, base_yalign: float, base_zoom: float):
         """Задаёт стартовые значения для только что созданной (пустой)
@@ -569,10 +545,6 @@ class AtlStepsPanel(QWidget):
 
     def to_atl_text(self) -> str:
         return steps_to_atl_text(self.steps, self.repeat, self.repeat_count)
-
-                                                                              
-                                     
-                                                                              
 
     def _emit_changed(self):
         if not self._suspend:
@@ -668,10 +640,7 @@ class AtlStepsPanel(QWidget):
     def _add_step(self):
         last_idx = len(self.steps) - 1
         last = self.steps[last_idx]
-                                                                              
-                                                                            
-                                                                             
-                                                                          
+        
                                                                             
         new_step = AtlStep(duration=1.0, warper=last.warper if last_idx > 0 else "linear",
                             enabled=dict(last.enabled),

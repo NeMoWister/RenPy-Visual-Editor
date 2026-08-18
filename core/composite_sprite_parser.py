@@ -19,14 +19,16 @@
 im.MatrixColor это единственный Composite).
 """
 import re
+import os
+import bisect
+from collections import Counter
 from dataclasses import dataclass, field
 from typing import List, Optional
 
-POSITIONS = ("far", "close", "normal")
-
+POSITIONS = ("far", "close", "normal")                                                       
+                                                                              
 _HEADER_RE = re.compile(
-    r'^[ \t]*image[ \t]+([a-zA-Z0-9_]+(?:[ \t]+[a-zA-Z0-9_]+)*)[ \t]*=[ \t]*'
-    r'(?:ConditionSwitch\(|im\.MatrixColor\([ \t]*)[ \t]*$',
+    r'^[ \t]*image[ \t]+([a-zA-Z0-9_]+(?:[ \t]+[a-zA-Z0-9_]+)*)[ \t]*=[ \t]*',
     re.MULTILINE,
 )
 _COMPOSITE_START_RE = re.compile(r'im\.Composite\(')
@@ -111,6 +113,10 @@ def parse_sprites_rpy(text: str, source: str = "custom") -> List[CompositeSprite
     искать сами файлы слоёв."""
     results: List[CompositeSprite] = []
     headers = list(_HEADER_RE.finditer(text))
+    # позиции переводов строк - для O(log n) вычисления номера строки вместо
+    # O(n) text.count(...) на каждый заголовок (критично для файлов с
+    # десятками тысяч объявлений, иначе парсинг скатывается в O(n^2))
+    newline_positions = [i for i, ch in enumerate(text) if ch == '\n']
 
     for idx, m in enumerate(headers):
         full_name = re.sub(r'\s+', ' ', m.group(1)).strip()
@@ -128,24 +134,18 @@ def parse_sprites_rpy(text: str, source: str = "custom") -> List[CompositeSprite
             continue
         character = words[0]
         rest_words = words[1:]
-
-                                                                            
-                                                                           
-                                                          
+                                           
         first_layer_path = _strip_sprites_prefix(raw_layers[0][2])
         position = "normal"
         path_parts = first_layer_path.split('/')
         if path_parts and path_parts[0] in POSITIONS:
-            position = path_parts[0]
-
-                                                                           
-                                                                         
+            position = path_parts[0]                                                         
         if rest_words and rest_words[-1] == position:
             variant_parts = rest_words[:-1]
         else:
             variant_parts = rest_words
 
-        line_no = text.count('\n', 0, m.start()) + 1
+        line_no = bisect.bisect_right(newline_positions, m.start()) + 1
 
         layers = [
             SpriteLayerDef(offset_x=ox, offset_y=oy, rel_path=_strip_sprites_prefix(path))
@@ -171,3 +171,110 @@ def parse_sprites_rpy_file(path: str, source: str = "custom") -> List[CompositeS
     with open(path, 'r', encoding='utf-8') as f:
         text = f.read()
     return parse_sprites_rpy(text, source=source)
+
+
+# ---------------------------------------------------------------------------
+# "Отдельные" (standalone) атрибуты-исключения.
+#
+# Обычно атрибуты одного персонажа выстраиваются в фиксированном порядке
+# (эмоция, потом одежда...), и колонка в UI редактора вычисляется по позиции
+# слова внутри variant_parts. Но иногда встречается ДОПОЛНИТЕЛЬНЫЙ,
+# необязательный аксессуар, вставленный ПОСЕРЕДИНЕ имени, который сбивает
+# эту позиционную логику - например:
+#
+#   image mt grin panama pioneer far = ...      <- panama лишний, эмоция(0)/одежда(1) сдвинуты
+#   image mt grin pioneer far = ...              <- а тут его нет вообще
+#
+# Если такое слово не выделить в собственный (необязательный) атрибут, оно
+# либо ломает вычисление колонок по индексу, либо смешивается с чужой
+# группой. Есть два способа его найти:
+#
+#   1. Явная подсказка в файле exceptions.txt, лежащем РЯДОМ с sprites.rpy
+#      (см. parse_exceptions_file ниже) - персонаж -> набор слов, которые
+#      ВСЕГДА должны становиться собственным отдельным атрибутом, даже если
+#      автоопределение (см. ниже) почему-то не сработает.
+#   2. Автоопределение (_auto_detect_extra_words): если для персонажа есть
+#      "типичная" (самая частая) длина variant_parts, а слово встречается
+#      ТОЛЬКО в более длинных комбинациях и никогда не входит в комбинации
+#      типичной длины - оно считается необязательным дополнительным
+#      атрибутом (аксессуаром), а не частью обычной позиционной цепочки.
+
+
+EXCEPTIONS_FILENAME = "exceptions.txt"
+
+
+def parse_exceptions_file(path: str) -> dict:
+    """Читает exceptions.txt (лежит рядом с sprites.rpy, в той же папке
+    sprites/): персонаж -> набор слов, которые всегда должны становиться
+    собственным отдельным (необязательным) атрибутом.
+
+    Формат - по одной записи на строку, гибкий:
+        mt: panama
+        mz: glasses, sunglasses
+        dv panama accessory
+
+    Разделитель между именем персонажа и словами - ":" если есть, иначе
+    просто пробел. Слова между собой можно разделять запятой и/или
+    пробелами. Пустые строки и строки, начинающиеся с "#", игнорируются.
+    Если файла нет - возвращается пустой словарь (это нормально, значит
+    для проекта используется только автоопределение)."""
+    result: dict = {}
+    if not path or not os.path.isfile(path):
+        return result
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+    except Exception:
+        return result
+
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line or line.startswith('#'):
+            continue
+        if ':' in line:
+            character, _, rest = line.partition(':')
+        else:
+            parts = line.split(None, 1)
+            if len(parts) < 2:
+                continue
+            character, rest = parts[0], parts[1]
+        character = character.strip()
+        if not character:
+            continue
+        words = {w.strip() for w in re.split(r'[,\s]+', rest) if w.strip()}
+        if not words:
+            continue
+        result.setdefault(character, set()).update(words)
+    return result
+
+
+def _auto_detect_extra_words(combos: List[List[str]]) -> set:
+    """См. описание выше - то же самое, но по эвристике: слово считается
+    отдельным необязательным атрибутом, если оно попадается ТОЛЬКО в
+    комбинациях длиннее типичной (самой частой) длины и ни разу не входит
+    ни в одну комбинацию типичной длины."""
+    if not combos:
+        return set()
+    lengths = Counter(len(c) for c in combos)
+    modal_len = lengths.most_common(1)[0][0]
+    modal_word_pool = set()
+    for c in combos:
+        if len(c) == modal_len:
+            modal_word_pool.update(c)
+    extra = set()
+    for c in combos:
+        if len(c) > modal_len:
+            for w in c:
+                if w not in modal_word_pool:
+                    extra.add(w)
+    return extra
+
+
+def get_standalone_attr_words(character: str, combos: List[List[str]], manual_words=None) -> set:
+    """Объединяет ручные исключения из exceptions.txt (manual_words) с
+    автоопределёнными - слова из этого множества всегда должны показываться
+    как собственный, независимый (необязательный) атрибут, а не мешаться в
+    позиционную группировку остальных атрибутов персонажа."""
+    manual = set(manual_words or ())
+    auto = _auto_detect_extra_words(combos)
+    return manual | auto

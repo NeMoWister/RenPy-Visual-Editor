@@ -63,7 +63,6 @@ class EditorSettingsDialog(QDialog):
         bottom.addWidget(btn_close)
         layout.addLayout(bottom)
 
-                                                                             
 
     def _setup_hotkeys_tab(self, tab: QWidget):
         layout = QVBoxLayout(tab)
@@ -125,8 +124,7 @@ class EditorSettingsDialog(QDialog):
         self.hotkey_store.reset_all()
         for action_id, edit in self._key_edits.items():
             edit.setKeySequence(QKeySequence(self.hotkey_store.get(action_id)))
-
-                                                                         
+             
 
     def _setup_autosave_tab(self, tab: QWidget):
         layout = QVBoxLayout(tab)
@@ -249,7 +247,7 @@ class EditorSettingsDialog(QDialog):
     def _on_theme_preview(self, _index: int):
         """Тема применяется сразу же, чтобы пользователь видел результат,
         не закрывая диалог. Сохраняется на диск только по кнопке
-        "Сохранить и закрыть".""" 
+        "Сохранить и закрыть"."""   
         theme_id = self.theme_combo.currentData()
         app = QApplication.instance()
         if app is not None and theme_id:
@@ -267,10 +265,7 @@ class EditorSettingsDialog(QDialog):
         self.app_settings.save(self.base_dir)
         self.accept()
 
-    def reject(self):
-                                                                            
-                                                                          
-                                                                           
+    def reject(self):            
         app = QApplication.instance()
         if app is not None:
             theme_manager.apply(app, self.app_settings.theme)

@@ -68,8 +68,8 @@ def compute_state_up_to(scene: Scene, node_index: int, rm=None) -> SceneState:
 def _resolve_sprite_tag(node: SceneNode, rm) -> tuple:
     """Возвращает (tag, composite_or_none) для узла SHOW_SPRITE/HIDE_SPRITE.
     Если sprite_var совпадает с составным спрайтом (sprites.rpy) - тег по
-    умолчанию это имя персонажа (первое слово), а не полное составное имя,
-    поэтому `hide cs` отрабатывает корректно без явного sprite_tag."""
+    умолчанию это имя персонажа (первое слово имени), а не полное составное
+    имя, поэтому `hide cs` отрабатывает корректно без явного sprite_tag."""
     composite = rm.find_composite_by_name(node.sprite_var) if (rm is not None and node.sprite_var) else None
     if composite is not None:
         tag = node.sprite_tag or composite.character
@@ -83,9 +83,6 @@ def _apply_node(state: SceneState, node: SceneNode, is_current: bool, rm=None):
 
     if t in (NodeType.SHOW_BG, NodeType.SCENE):
         state.bg_var = node.bg_var or None
-                                                                             
-                                                                    
-                                                             
         state.cg_var = None
         state.bg_atl_script = node.atl_script or ""
                                                                          
@@ -120,15 +117,11 @@ def _apply_node(state: SceneState, node: SceneNode, is_current: bool, rm=None):
             )
     elif t == NodeType.HIDE_SPRITE:
         if node.hide_group:
-                                                                        
-                                                                      
-                                                                     
-                                                    
             to_remove = [tag for tag, sp in state.sprites.items() if sp.top_group() == node.hide_group]
             for tag in to_remove:
                 del state.sprites[tag]
         else:
-            tag, _ = _resolve_sprite_tag(node, rm)
+            tag, _composite = _resolve_sprite_tag(node, rm)
             if tag and tag in state.sprites:
                 del state.sprites[tag]
     elif t == NodeType.NVL_MODE:
@@ -146,9 +139,6 @@ def _apply_node(state: SceneState, node: SceneNode, is_current: bool, rm=None):
             state.char_var = None
             state.text = node.text
         else:
-                                                                  
-                                                                  
-                                                              
             if t not in (NodeType.SHOW_BG, NodeType.SHOW_CG, NodeType.SCENE,
                          NodeType.SHOW_SPRITE, NodeType.HIDE_SPRITE,
                          NodeType.HIDE_CG):

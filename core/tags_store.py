@@ -32,9 +32,6 @@ class TagsStore:
         self.categories: List[TagCategory] = []
                                                                    
         self.resource_tags: Dict[str, List[str]] = {}
-
-                                                                          
-
     @classmethod
     def load(cls, base_dir: str) -> "TagsStore":
         store = cls()
@@ -51,8 +48,6 @@ class TagsStore:
             "categories": [asdict(c) for c in self.categories],
             "resource_tags": self.resource_tags,
         })
-
-                                                                           
 
     def get_category(self, category_id: str) -> Optional[TagCategory]:
         for c in self.categories:
@@ -78,8 +73,6 @@ class TagsStore:
             if not self.resource_tags[var]:
                 del self.resource_tags[var]
 
-                                                                           
-
     def add_tag(self, category_id: str, tag_text: str) -> bool:
         cat = self.get_category(category_id)
         tag_text = tag_text.strip()
@@ -98,8 +91,6 @@ class TagsStore:
                 keys.remove(key)
                 if not keys:
                     del self.resource_tags[var]
-
-                                                                           
 
     def get_tags_for(self, var_name: str) -> List[str]:
         return list(self.resource_tags.get(var_name, []))
